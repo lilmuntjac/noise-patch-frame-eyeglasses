@@ -21,8 +21,8 @@ def denormalize(data, mean=imagenet_mean, std=imagenet_std):
         std= [1/s for s in std])
     return transform(data)
 
-def save_model(model, optimizer, name, root_folder='/tmp2/aislab/makila/model_checkpoint'):
-    """Save the model weight, optimizer, and random states"""
+def save_model(model, optimizer, scheduler, name, root_folder='/tmp2/aislab/makila/model_checkpoint'):
+    """Save the model weight, optimizer, scheduler, and random states"""
 
     folder = Path(root_folder)
     folder.mkdir(parents=True, exist_ok=True)
@@ -31,12 +31,13 @@ def save_model(model, optimizer, name, root_folder='/tmp2/aislab/makila/model_ch
     save_dict = {
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict(),
         'rng_state': torch.get_rng_state(),
         'cuda_rng_state': torch.cuda.get_rng_state(),
     }
     torch.save(save_dict, path)
 
-def load_model(model, optimizer, name, root_folder='/tmp2/aislab/makila/model_checkpoint'):
+def load_model(model, optimizer, scheduler, name, root_folder='/tmp2/aislab/makila/model_checkpoint'):
     """Load the model weight, optimizer, and random states"""
 
     folder = Path(root_folder)
@@ -44,9 +45,10 @@ def load_model(model, optimizer, name, root_folder='/tmp2/aislab/makila/model_ch
     ckpt = torch.load(path)
     model.load_state_dict(ckpt['model_state_dict'])
     optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+    scheduler.load_state_dict(ckpt['scheduler_state_dict'])
     torch.set_rng_state(ckpt['rng_state'])
     torch.cuda.set_rng_state(ckpt['cuda_rng_state'])
-    return model, optimizer
+    return model, optimizer, scheduler
 
 def save_stats(nparray, name, root_folder='/tmp2/aislab/makila/model_stats'):
     """Save the numpy array"""

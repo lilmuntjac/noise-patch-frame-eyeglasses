@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import pandas as pd 
 
@@ -9,19 +10,17 @@ from lib.datasets import CelebA
 from lib.models import CelebAModel
 from lib.utils import *
 
-def main():
+def main(args):
     print('Pytorch is running on version: ' + torch.__version__)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # args
-    batch_size_per_gpu = 128
     seed = 33907
-    epochs = 125
     # set seeds
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     # dataloader
-    celeba = CelebA(batch_size=batch_size_per_gpu)
+    celeba = CelebA(batch_size=args.batch_size)
     train_dataloader = celeba.train_dataloader
     val_dataloader = celeba.val_dataloader
     # model, optimizer, and scheduler
@@ -31,6 +30,9 @@ def main():
         weight_decay=1e-5, momentum=0.9,
     )
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.921)
+    if args.resume:
+        model, optimizer, scheduler = load_model(model, optimizer, scheduler, args.resume)
+
 
     def train():
         train_stat = np.array([])
@@ -89,24 +91,38 @@ def main():
     val_stat = np.array([])
     # Run the code
     print(f'Start training')
-    for i in range(epochs):
+    start_time = time.time()
+    for epoch in range(args.start_epoch, args.epochs):
         train_stat_per_epoch = train()
-        val_stat_per_epoch = val()
         scheduler.step()
+        val_stat_per_epoch = val()
 
         train_stat = np.concatenate((train_stat, train_stat_per_epoch), axis=0) if len(train_stat) else train_stat_per_epoch
         val_stat = np.concatenate((val_stat, val_stat_per_epoch), axis=0) if len(val_stat) else val_stat_per_epoch
         # print some basic statistic
-        print(f'Epoch: {i:02d}')
+        print(f'Epoch: {epoch:02d}')
         for a in range(4): # all attributes
             macc, facc, tacc, equality_of_opportunity, equalized_odds = get_basic_stat(a, val_stat_per_epoch)
             print(f'    {macc:.4f} - {facc:.4f} - {tacc:.4f} -- {equality_of_opportunity:.4f} - {equalized_odds:.4f}')
         # save model checkpoint
-        save_model(model, optimizer, name=f'{seed}_CelebA_{i:04d}_')
+        save_model(model, optimizer, scheduler, name=f'{seed}_CelebA_{epoch:04d}_')
     # save basic statistic
     save_stats(train_stat, f'{seed}_CelebA_train_')
     save_stats(val_stat, f'{seed}_CelebA_val_')
+    total_time = time.time() - start_time
+    print(f'Training time: {total_time/60:.4f} mins')
 
+def get_args():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Model training")
+    parser.add_argument("-b", "--batch-size", default=128, type=int, help="batch size for model inputs")
+    parser.add_argument("--epochs", default=125, type=int, help="number of epochs to run")
+    parser.add_argument("--resume", default="", help="name of a checkpoint, without .pth")
+    parser.add_argument("--start-epoch", default=0, type=int, help="start epoch, it won't do any check with the weight loaded")
+
+    return parser
 
 if __name__ == '__main__':
-    main()
+    args = get_args().parse_args()
+    main(args)
