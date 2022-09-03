@@ -64,7 +64,7 @@ class FairFaceModel(torch.nn.Module):
     """
 
     def __init__(self, out_feature=18, weights='MobileNet_V3_Small_Weights.DEFAULT'):
-        super(UTKfaceModel, self).__init__()
+        super(FairFaceModel, self).__init__()
         self.model = models.mobilenet_v3_small(weights=weights)
         in_feature = self.model.classifier[0].in_features
         self.model.classifier = nn.Sequential(OrderedDict([
@@ -88,7 +88,7 @@ class AgeModel(torch.nn.Module):
     """
 
     def __init__(self, out_feature=1, weights='MobileNet_V3_Small_Weights.DEFAULT'):
-        super(UTKfaceModel, self).__init__()
+        super(AgeModel, self).__init__()
         self.model = models.mobilenet_v3_small(weights=weights)
         in_feature = self.model.classifier[0].in_features
         self.model.classifier = nn.Sequential(OrderedDict([

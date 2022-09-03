@@ -5,8 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from lib.datasets import CelebA
-from lib.models import CelebAModel
+from lib.datasets import FairFace
+from lib.models import FairFaceModel
 from lib.utils import *
 
 def main(args):
@@ -19,11 +19,11 @@ def main(args):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     # dataloader
-    celeba = CelebA(batch_size=args.batch_size)
-    train_dataloader = celeba.train_dataloader
-    val_dataloader = celeba.val_dataloader
+    fairface = FairFace(batch_size=args.batch_size)
+    train_dataloader = fairface.train_dataloader
+    val_dataloader = fairface.val_dataloader
     # model, optimizer, and scheduler
-    model = CelebAModel(weights=None).to(device)
+    model = FairFaceModel(weights=None).to(device)
     optimizer = torch.optim.RMSprop(
         model.parameters(), lr=0.064, alpha=0.9, eps=0.0316, 
         weight_decay=1e-5, momentum=0.9,
@@ -38,20 +38,20 @@ def main(args):
         model.train()
         # training loop
         for batch_idx, (data, label) in enumerate(train_dataloader):
-            label, sens = celeba.process_label(label)
-            data, label, sens = data.to(device), label.to(torch.float32).to(device), sens.to(device)
+            data, label = data.to(device), label.to(device)
             instance = normalize(data)
             optimizer.zero_grad()
             logit = model(instance)
-            loss = F.binary_cross_entropy(logit, label)
+            loss = F.cross_entropy(logit[:,0:7], label[:,0]) + \
+                   F.cross_entropy(logit[:,7:9], label[:,1]) + \
+                   F.cross_entropy(logit[:,9:18], label[:,2])
             loss.backward()
             optimizer.step()
             # collecting performance information
-            pred = torch.where(logit> 0.5, 1, 0).to(device)
-            stat = celeba.process_pred(pred, label, sens)
-            stat = stat[np.newaxis, :]
-            train_stat = train_stat+stat if len(train_stat) else stat
-        return train_stat # in shape (1, attribute, 8)
+            result = fairface.process_logit(logit, label, 'race')
+            result = result[np.newaxis, :]
+            train_stat = train_stat+result if len(train_stat) else result
+        return train_stat # in shape (1, attribute, 2)
         
     def val():
         val_stat = np.array([])
@@ -59,31 +59,15 @@ def main(args):
         with torch.no_grad():
             # validaton loop
             for batch_idx, (data, label) in enumerate(val_dataloader):
-                label, sens = celeba.process_label(label)
-                data, label, sens = data.to(device), label.to(torch.float32).to(device), sens.to(device)
-                instance = normalize(data)            
+                data, label = data.to(device), label.to(device)
+                instance = normalize(data)
+                optimizer.zero_grad()
                 logit = model(instance)
                 # collecting performance information
-                pred = torch.where(logit> 0.5, 1, 0).to(device)
-                stat = celeba.process_pred(pred, label, sens)
-                stat = stat[np.newaxis, :]
-                val_stat = val_stat+stat if len(val_stat) else stat
-            return val_stat # in shape (1, attribute, 8)
-    
-    def get_basic_stat(idx, stat):
-        # Inupt: stat in shape (1, attribute, 8)
-        mtp, mfp, mfn, mtn = stat[0,idx,0:4]
-        ftp, ffp, ffn, ftn = stat[0,idx,4:8]
-        # accuracy
-        macc = (mtp+mtn)/(mtp+mfp+mfn+mtn)
-        facc = (ftp+ftn)/(ftp+ffp+ffn+ftn)
-        tacc = (mtp+mtn+ftp+ftn)/(mtp+mfp+mfn+mtn+ftp+ffp+ffn+ftn)
-        # fairness
-        mtpr, mtnr = mtp/(mtp+mfn), mtn/(mtn+mfp)
-        ftpr, ftnr = ftp/(ftp+ffn), ftn/(ftn+ffp)
-        equality_of_opportunity = abs(mtpr-ftpr)
-        equalized_odds = abs(mtpr-ftpr) + abs(mtnr-ftnr)
-        return macc, facc, tacc, equality_of_opportunity, equalized_odds
+                result = fairface.process_logit(logit, label, 'race')
+                result = result[np.newaxis, :]
+                val_stat = val_stat+result if len(val_stat) else result
+            return val_stat # in shape (1, attribute, 2)
 
     # performance recording
     train_stat = np.array([])
@@ -100,14 +84,15 @@ def main(args):
         val_stat = np.concatenate((val_stat, val_stat_per_epoch), axis=0) if len(val_stat) else val_stat_per_epoch
         # print some basic statistic
         print(f'Epoch: {epoch:02d}')
-        for a in range(4): # all attributes
-            macc, facc, tacc, equality_of_opportunity, equalized_odds = get_basic_stat(a, val_stat_per_epoch)
-            print(f'    {macc:.4f} - {facc:.4f} - {tacc:.4f} -- {equality_of_opportunity:.4f} - {equalized_odds:.4f}')
+        g1_race_acc, g1_gender_acc, g1_age_acc = val_stat_per_epoch[0,:,0] / (val_stat_per_epoch[0,:,0]+val_stat_per_epoch[0,:,1])
+        g2_race_acc, g2_gender_acc, g2_age_acc = val_stat_per_epoch[0,:,2] / (val_stat_per_epoch[0,:,2]+val_stat_per_epoch[0,:,3])
+        print(f'    {g1_race_acc:.4f} {g1_gender_acc:.4f} {g1_age_acc:.4f}')
+        print(f'    {g2_race_acc:.4f} {g2_gender_acc:.4f} {g2_age_acc:.4f}')
         # save model checkpoint
-        save_model(model, optimizer, scheduler, name=f'{seed}_CelebA_{epoch:04d}')
+        save_model(model, optimizer, scheduler, name=f'{seed}_FairFace_{epoch:04d}')
     # save basic statistic
-    save_stats(train_stat, f'{seed}_CelebA_train')
-    save_stats(val_stat, f'{seed}_CelebA_val')
+    save_stats(train_stat, f'{seed}_FairFace_train')
+    save_stats(val_stat, f'{seed}_FairFace_val')
     total_time = time.time() - start_time
     print(f'Training time: {total_time/60:.4f} mins')
 
