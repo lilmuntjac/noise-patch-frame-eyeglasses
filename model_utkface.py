@@ -51,7 +51,7 @@ def main(args):
             result = utkface.process_logit(logit, label, 'race')
             result = result[np.newaxis, :]
             train_stat = train_stat+result if len(train_stat) else result
-        return train_stat # in shape (1, attribute, 2)
+        return train_stat # in shape (1, 3, 4), 3: race + gender + age, 4: split in 2 groups x (right and wrong)
         
     def val():
         val_stat = np.array([])
@@ -67,7 +67,7 @@ def main(args):
                 result = utkface.process_logit(logit, label, 'race')
                 result = result[np.newaxis, :]
                 val_stat = val_stat+result if len(val_stat) else result
-            return val_stat # in shape (1, attribute, 2)
+            return val_stat # in shape (1, 3, 4), 3: race + gender + age, 4: split in 2 groups x (right and wrong)
 
     # performance recording
     train_stat = np.array([])
@@ -86,8 +86,10 @@ def main(args):
         print(f'Epoch: {epoch:02d}')
         g1_race_acc, g1_gender_acc, g1_age_acc = val_stat_per_epoch[0,:,0] / (val_stat_per_epoch[0,:,0]+val_stat_per_epoch[0,:,1])
         g2_race_acc, g2_gender_acc, g2_age_acc = val_stat_per_epoch[0,:,2] / (val_stat_per_epoch[0,:,2]+val_stat_per_epoch[0,:,3])
-        print(f'    {g1_race_acc:.4f} {g1_gender_acc:.4f} {g1_age_acc:.4f}')
-        print(f'    {g2_race_acc:.4f} {g2_gender_acc:.4f} {g2_age_acc:.4f}')
+        race_acc, gender_acc, age_acc = (val_stat_per_epoch[0,:,0]+val_stat_per_epoch[0,:,2]) / np.sum(val_stat_per_epoch[0,:,:], axis=1)
+        print(f'    {g1_race_acc:.4f} - {g2_race_acc:.4f} - {race_acc:.4f} -- {abs(g1_race_acc-g2_race_acc):.4f}')
+        print(f'    {g1_gender_acc:.4f} - {g2_gender_acc:.4f} - {gender_acc:.4f} -- {abs(g1_gender_acc-g2_gender_acc):.4f}')
+        print(f'    {g1_age_acc:.4f} - {g2_age_acc:.4f} - {age_acc:.4f} -- {abs(g1_age_acc-g2_age_acc):.4f}')
         # save model checkpoint
         save_model(model, optimizer, scheduler, name=f'{seed}_UTKface_{epoch:04d}')
     # save basic statistic
