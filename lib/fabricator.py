@@ -6,6 +6,37 @@ from PIL import Image
 import torch
 import torch.nn.functional as F
 
+class NoiseOverlay:
+    """
+    """
+
+    def __init__(self, barch_size=128, width=224, budget=0.1, device='cuda'):
+        self.batch_size = barch_size
+        self.width = width
+        self.budget = budget
+        self.device = device
+
+    def apply(self, image, label, master):
+        """
+        add the noise onto the image, and keep the image in the valid range of value
+            Input:
+                image: a batch of image in shape (N, C, H, W)
+                label: a batch of label in shape (N, X)
+                master: an adverserial element applys to the image in shape (1, C, H, W)
+            Output:
+                image: a batch of image in shape (M, C, H, W)
+                label: a batch of label in shape (M, X), unmodified
+                no dropping of any data-label pair, so M == N
+        """
+        new_image = image + master
+        new_image = torch.clamp(new_image, min=0.0, max=1.0)
+        return new_image, label
+
+    def clip_by_budget(self, master):
+        """clip the adversarial element by budget"""
+        master.data.clamp_(-self.budget, self.budget)
+
+
 class CircleMasking:
     """
     """

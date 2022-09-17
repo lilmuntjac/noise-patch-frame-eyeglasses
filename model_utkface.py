@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from lib.datasets import UTKface
 from lib.models import UTKfaceModel
+from lib.fairness import *
 from lib.utils import *
 
 def main(args):
@@ -48,9 +49,10 @@ def main(args):
             loss.backward()
             optimizer.step()
             # collecting performance information
-            result = utkface.process_logit(logit, label, 'race')
-            result = result[np.newaxis, :]
-            train_stat = train_stat+result if len(train_stat) else result
+            pred =  to_prediction(logit, model_name='UTKface')
+            stat = calc_groupacc(pred, label, split='race')
+            stat = stat[np.newaxis, :]
+            train_stat = train_stat+stat if len(train_stat) else stat
         return train_stat # in shape (1, 3, 4), 3: race + gender + age, 4: split in 2 groups x (right and wrong)
         
     def val():
@@ -64,9 +66,10 @@ def main(args):
                 optimizer.zero_grad()
                 logit = model(instance)
                 # collecting performance information
-                result = utkface.process_logit(logit, label, 'race')
-                result = result[np.newaxis, :]
-                val_stat = val_stat+result if len(val_stat) else result
+                pred =  to_prediction(logit, model_name='UTKface')
+                stat = calc_groupacc(pred, label, split='race')
+                stat = stat[np.newaxis, :]
+                val_stat = val_stat+stat if len(val_stat) else stat
             return val_stat # in shape (1, 3, 4), 3: race + gender + age, 4: split in 2 groups x (right and wrong)
 
     # performance recording

@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from lib.datasets import FairFace
 from lib.models import FairFaceModel
+from lib.fairness import *
 from lib.utils import *
 
 def main(args):
@@ -48,9 +49,10 @@ def main(args):
             loss.backward()
             optimizer.step()
             # collecting performance information
-            result = fairface.process_logit(logit, label, 'race')
-            result = result[np.newaxis, :]
-            train_stat = train_stat+result if len(train_stat) else result
+            pred =  to_prediction(logit, model_name='FairFace')
+            stat = calc_groupacc(pred, label, split='race')
+            stat = stat[np.newaxis, :]
+            train_stat = train_stat+stat if len(train_stat) else stat
         return train_stat # in shape (1, attribute, 2)
         
     def val():
@@ -64,9 +66,10 @@ def main(args):
                 optimizer.zero_grad()
                 logit = model(instance)
                 # collecting performance information
-                result = fairface.process_logit(logit, label, 'race')
-                result = result[np.newaxis, :]
-                val_stat = val_stat+result if len(val_stat) else result
+                pred =  to_prediction(logit, model_name='FairFace')
+                stat = calc_groupacc(pred, label, split='race')
+                stat = stat[np.newaxis, :]
+                val_stat = val_stat+stat if len(val_stat) else stat
             return val_stat # in shape (1, attribute, 2)
 
     # performance recording
@@ -86,8 +89,10 @@ def main(args):
         print(f'Epoch: {epoch:02d}')
         g1_race_acc, g1_gender_acc, g1_age_acc = val_stat_per_epoch[0,:,0] / (val_stat_per_epoch[0,:,0]+val_stat_per_epoch[0,:,1])
         g2_race_acc, g2_gender_acc, g2_age_acc = val_stat_per_epoch[0,:,2] / (val_stat_per_epoch[0,:,2]+val_stat_per_epoch[0,:,3])
-        print(f'    {g1_race_acc:.4f} {g1_gender_acc:.4f} {g1_age_acc:.4f}')
-        print(f'    {g2_race_acc:.4f} {g2_gender_acc:.4f} {g2_age_acc:.4f}')
+        race_acc, gender_acc, age_acc = (val_stat_per_epoch[0,:,0]+val_stat_per_epoch[0,:,2]) / np.sum(val_stat_per_epoch[0,:,:], axis=1)
+        print(f'    {g1_race_acc:.4f} - {g2_race_acc:.4f} - {race_acc:.4f} -- {abs(g1_race_acc-g2_race_acc):.4f}')
+        print(f'    {g1_gender_acc:.4f} - {g2_gender_acc:.4f} - {gender_acc:.4f} -- {abs(g1_gender_acc-g2_gender_acc):.4f}')
+        print(f'    {g1_age_acc:.4f} - {g2_age_acc:.4f} - {age_acc:.4f} -- {abs(g1_age_acc-g2_age_acc):.4f}')
         # save model checkpoint
         save_model(model, optimizer, scheduler, name=f'{seed}_FairFace_{epoch:04d}')
     # save basic statistic

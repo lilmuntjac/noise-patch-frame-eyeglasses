@@ -4,10 +4,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision.utils import save_image
 
 from lib.datasets import CelebA
 from lib.models import CelebAModel
 from lib.fabricator import NoiseOverlay
+from lib.fairness import *
 from lib.utils import *
 
 def main(args):
@@ -50,26 +52,55 @@ def main(args):
     # NoiseOverlay
     noise_overlay = NoiseOverlay()
 
+    def save_batch_image(image, name, root_folder='./toyexp'):
+        folder = Path(root_folder)
+        folder.mkdir(parents=True, exist_ok=True)
+        
+        for idx in range(image.shape[0]):
+            path = folder / f"{name}_{idx}.png"
+            save_image(image[idx:idx+1,:,:,:].detach().cpu(), path)
+
     def train():
         train_stat = np.array([])
         model.eval()
         # training loop
         for batch_idx, (data, label) in enumerate(train_dataloader):
-            label, sens = celeba.process_label(label)
+            # label, sens = celeba.process_label(label)
+            label, sens = filter_celeba_label(label)
             data, label, sens = data.to(device), label.to(torch.float32).to(device), sens.to(device)
-            adv_image = noise_overlay.apply(data, label, master)
-            adv_image = normalize(adv_image)
-            adversary_optimizer.zero_grad()
-            logit = model(adv_image)
-            # loss ?
-            
+            # save a batch of image
+            save_batch_image(data, 'toyexp')
+            # pass image into the model to get logit
+            logit = model(normalize(data))
+            # regroup the training label and logit
+            m_pred, m_label = logit[sens[:,0]==1], label[sens[:,0]==1]
+            f_pred, f_label = logit[sens[:,0]==0], label[sens[:,0]==0]
+            # print the traininig label and logit
+
+            print("group 1")
+            print(m_pred)
+            print(m_label)
+            print("group 2")
+            print(f_pred)
+            print(f_label)
+
+            pred = torch.where(logit> 0.5, 1, 0)
+            print(pred)
+
+
+            break # run only once
+    
+    start_time = time.time()
+    train()
+    total_time = time.time() - start_time
+    print(f'Running time: {total_time/60:.4f} mins')
 
 
 def get_args():
     import argparse
 
     parser = argparse.ArgumentParser(description="Noise training")
-    parser.add_argument("-b", "--batch-size", default=128, type=int, help="batch size for model inputs")
+    parser.add_argument("-b", "--batch-size", default=8, type=int, help="batch size for model inputs")
     parser.add_argument("--epochs", default=125, type=int, help="number of epochs to run")
     parser.add_argument("--resume", default="", help="name of a adversarial element, without .npy")
     parser.add_argument("--start-epoch", default=0, type=int, help="start epoch, it won't do any check with the element loaded")

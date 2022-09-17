@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from lib.datasets import UTKface
 from lib.models import AgeModel
+from lib.fairness import *
 from lib.utils import *
 
 def main(args):
@@ -38,7 +39,7 @@ def main(args):
         model.train()
         # training loop
         for batch_idx, (data, label) in enumerate(train_dataloader):
-            label, sens = utkface.process_label(label)
+            label, sens = filter_agemodel_label(label)
             data, label, sens = data.to(device), label.to(torch.float32).to(device), sens.to(device)
             instance = normalize(data)
             optimizer.zero_grad()
@@ -47,8 +48,8 @@ def main(args):
             loss.backward()
             optimizer.step()
             # collecting performance information
-            pred = torch.where(logit> 0.5, 1, 0).to(device)
-            stat = utkface.process_pred(pred, label, sens)
+            pred = to_prediction(logit, model_name='AgeModel')
+            stat = calc_groupcm(pred, label, sens)
             stat = stat[np.newaxis, :]
             train_stat = train_stat+stat if len(train_stat) else stat
         return train_stat # in shape (1, 1, 8)
@@ -59,13 +60,13 @@ def main(args):
         with torch.no_grad():
             # validaton loop
             for batch_idx, (data, label) in enumerate(val_dataloader):
-                label, sens = utkface.process_label(label)
+                label, sens = filter_agemodel_label(label)
                 data, label, sens = data.to(device), label.to(torch.float32).to(device), sens.to(device)
                 instance = normalize(data)
                 logit = model(instance)
                 # collecting performance information
-                pred = torch.where(logit> 0.5, 1, 0).to(device)
-                stat = utkface.process_pred(pred, label, sens)
+                pred = to_prediction(logit, model_name='AgeModel')
+                stat = calc_groupcm(pred, label, sens)
                 stat = stat[np.newaxis, :]
                 val_stat = val_stat+stat if len(val_stat) else stat
             return val_stat # in shape (1, 1, 8)
