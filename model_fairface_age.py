@@ -48,7 +48,7 @@ def main(args):
             loss.backward()
             optimizer.step()
             # collecting performance information
-            pred =  to_prediction(logit, model_name='FairFace')
+            pred =  to_prediction(logit, model_name='AgeModel')
             stat = calc_groupcm(pred, label, sens)
             stat = stat[np.newaxis, :]
             train_stat = train_stat+stat if len(train_stat) else stat
@@ -65,7 +65,7 @@ def main(args):
                 instance = normalize(data)
                 logit = model(instance)
                 # collecting performance information
-                pred =  to_prediction(logit, model_name='FairFace')
+                pred =  to_prediction(logit, model_name='AgeModel')
                 stat = calc_groupcm(pred, label, sens)
                 stat = stat[np.newaxis, :]
                 val_stat = val_stat+stat if len(val_stat) else stat
