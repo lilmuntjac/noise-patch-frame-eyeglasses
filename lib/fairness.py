@@ -187,7 +187,7 @@ def bce_TPR_loss(logit, label, sens, target_type='tp', policy='buck_only', indir
     elif policy == 'boost_only':
         g1_coef, g2_coef = calc_coef(g1_TPR, g2_TPR, buck=0, boost=1)
     elif policy == 'buck_boost':
-        g1_coef, g2_coef = calc_coef(g1_TPR, g2_TPR, buck=1, boost=1)
+        g1_coef, g2_coef = calc_coef(g1_TPR, g2_TPR, buck=-1, boost=1)
     else:
         assert False, f'Unsupport policy'
     g1_loss = g1_bce*(g1_target*g1_coef)

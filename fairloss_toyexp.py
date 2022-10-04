@@ -91,7 +91,8 @@ def main(args):
             #                            [1,0,0,0]])
             # fake_label = fake_label.to(torch.float32)
             # bce_TPR_loss(fake_logit, fake_label, fake_sens)
-            loss = bce_TPR_loss(logit, label, sens, indirect=True)
+            loss = bce_TPR_loss(logit, label, sens, args.target_type, args.policy, args.indirect)
+            print(args.indirect)
             print(loss)
 
 
@@ -115,6 +116,10 @@ def get_args():
     parser.add_argument("--start-epoch", default=0, type=int, help="start epoch, it won't do any check with the element loaded")
 
     parser.add_argument("--model", default="33907_CelebA_0124", help="name of a checkpoint, without .pth")
+    parser.add_argument("--name", default="CelebA_noise_cm", help="name to save the stats")
+    parser.add_argument("--target-type", default="tp", help="target cell be selected for fairness")
+    parser.add_argument("--policy", default="buck_only", help="policy on how to mutiply the target cells")
+    parser.add_argument("--indirect", default=False, help="boolean value to include cells that have negative label or not")
     return parser
 
 if __name__ == '__main__':
