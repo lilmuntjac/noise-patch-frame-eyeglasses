@@ -1,6 +1,7 @@
 import numpy as np
 
 import torch
+import torch.nn.functional as F
 
 def filter_celeba_label(label, attr_pred_idx=[2, 19, 21, 31], attr_sens_idx=[20,]):
     """Split the CelebA label into training label and sensitive attribute"""
@@ -90,3 +91,115 @@ def calc_groupacc(pred, label, split):
     else:
         assert False, f'Unsupport split attribute'
     return stat.detach().cpu().numpy()
+
+def bce_acc_loss(logit, label, sens, loss_type='diff'):
+    """
+    Binary cross entropy based fairloss for prediction quailty
+    Input:
+        logit: model output from CelebA model or Age model
+        label: training label for CelebA model or Age model
+        sens: sensitive attribute for CelebA model or Age model
+        type: types of fair loss, 
+            "diff": difference of losses
+            "pfrac": 1 - proper fractionof losses min(g1,g2)/max(g1,g2)
+            "max": only the loss from disadvantage group
+    Output: fairloss for prediction quailty in shape []
+    """
+    # raw binary cross entropy loss with shape (N, attributes)
+    raw_bce = F.binary_cross_entropy(logit, label, reduction='none')
+    # regroup the raw binary cross entropy loss into 2 groups
+    g1_celoss = torch.mean(raw_bce[sens[:,0]==0], dim=0)
+    g2_celoss = torch.mean(raw_bce[sens[:,0]!=0], dim=0)
+    if loss_type == 'diff':
+        fair_bce = torch.abs(g1_celoss-g2_celoss)
+    elif loss_type == 'pfrac':
+        fair_bce = torch.sub(1, torch.minimum(g1_celoss, g2_celoss)/torch.maximum(g1_celoss, g2_celoss))
+    elif loss_type == 'max':
+        fair_bce = torch.maximum(g1_celoss, g2_celoss)
+    else:
+        assert False, f'Unsupport loss type'
+    # take mean of all attributes
+    fair_bce = torch.mean(fair_bce)
+    return fair_bce
+
+def bce_TPR_loss(logit, label, sens, target_type='tp', policy='buck_only', indirect=False):
+    """
+    Binary cross entropy based fairloss for equality on TPR
+    Input:
+        logit: model output from CelebA model or Age model
+        label: training label for CelebA model or Age model
+        sens: sensitive attribute for CelebA model or Age model
+        target_type: target cell be selected for fairness, only "tp", "fn", and "tp_fn" are allowed
+                     default: "tp"
+        policy: policy on how to mutiply the target cells
+            "buck_only": x-1 on the target cell for the advantage group, x0 for the disadvantage group.
+            "boost_only": x1 on the target cell for the disadvantage group, x0 for the advantage group.
+            "buck_boost": x-1 on the target cell for the advantage group, x1 for the disadvantage group.
+            default: "buck_only"
+        indirect: boolean value to include cells that have negative label or not, default is False
+    Output: fairloss for prediction quailty in shape []
+    """
+    def regroup(tensor, sens):
+        # regroup logit, prediction, or jabel into 2 groups
+        g1_tensor = tensor[sens[:,0]==0]
+        g2_tensor = tensor[sens[:,0]!=0]
+        return g1_tensor, g2_tensor
+    def calc_tpr(pred, label):
+        # compute true positive rate for prediction from a group
+        # pred, label should be in same shape of (attributes)
+        numerator = torch.sum(pred*label, dim=0) # TP
+        denominator = torch.sum(label, dim=0) # ~TP+FN
+        TPR = torch.full_like(denominator, fill_value=1.0)
+        TPR_mask = (denominator != 0)
+        TPR[TPR_mask] = numerator[TPR_mask]/denominator[TPR_mask]
+        return TPR
+    def calc_coef(g1_TPR, g2_TPR, buck, boost, ignore=0):
+        # compute coefficient for target cell in 2 groups
+        g1_boost = torch.where(g1_TPR < g2_TPR, boost, ignore)
+        g1_buck = torch.where(g1_TPR > g2_TPR, buck, ignore)
+        g1_coef = g1_boost+g1_buck
+        g2_boost = torch.where(g2_TPR < g1_TPR, boost, ignore)
+        g2_buck = torch.where(g2_TPR > g1_TPR, buck, ignore)
+        g2_coef = g2_boost+g2_buck
+        return g1_coef, g2_coef
+
+    # compute the coefficient for the BCE loss
+    pred = torch.where(logit> 0.5, 1, 0) # just like prediction on CelebA and the Age model
+    raw_bce = F.binary_cross_entropy(logit, label, reduction='none')
+    g1_bce, g2_bce = regroup(raw_bce, sens)
+    # extract the target cell mask
+    if target_type == 'tp':
+        target_cell = pred*label
+    elif target_type == 'fn':
+        target_cell = torch.sub(1, pred)*label
+    elif target_type == 'tp_fn':
+        target_cell = pred*label + torch.sub(1, pred)*label
+    else:
+        assert False, f'Unsupport target cell type'
+    g1_target, g2_target = regroup(target_cell, sens)
+    # find the advantage group and disadvantage group by comparing TPR
+    g1_pred, g2_pred = regroup(pred, sens)
+    g1_label, g2_label = regroup(label, sens)
+    g1_TPR, g2_TPR = calc_tpr(g1_pred, g1_label), calc_tpr(g2_pred, g2_label)
+    # fairness policy
+    if policy == 'buck_only':
+        g1_coef, g2_coef = calc_coef(g1_TPR, g2_TPR, buck=-1, boost=0)
+    elif policy == 'boost_only':
+        g1_coef, g2_coef = calc_coef(g1_TPR, g2_TPR, buck=0, boost=1)
+    elif policy == 'buck_boost':
+        g1_coef, g2_coef = calc_coef(g1_TPR, g2_TPR, buck=1, boost=1)
+    else:
+        assert False, f'Unsupport policy'
+    g1_loss = g1_bce*(g1_target*g1_coef)
+    g2_loss = g2_bce*(g2_target*g2_coef)
+    direct_loss = torch.cat((g1_loss, g2_loss), 0)
+    # whether to include the false positive cells and true negative cell
+    if indirect:
+        false_positive = pred*torch.sub(1, label)
+        true_negative = torch.sub(1, pred)*torch.sub(1, label)
+        indir_cell = false_positive+true_negative
+        g1_indir, g2_inder = regroup(indir_cell, sens)
+        indir_loss = torch.cat((g1_bce*g1_indir, g2_bce*g2_inder), 0)
+        return torch.mean(direct_loss+indir_loss)
+    else:
+        return torch.mean(direct_loss)

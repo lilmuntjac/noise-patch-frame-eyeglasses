@@ -72,20 +72,29 @@ def main(args):
             save_batch_image(data, 'toyexp')
             # pass image into the model to get logit
             logit = model(normalize(data))
-            # regroup the training label and logit
-            m_pred, m_label = logit[sens[:,0]==1], label[sens[:,0]==1]
-            f_pred, f_label = logit[sens[:,0]==0], label[sens[:,0]==0]
-            # print the traininig label and logit
+            # fake_logit = torch.tensor([[0.02, 0.02, 0.9, 0.9],
+            #                            [0.02, 0.57, 0.01, 0.53],
+            #                            [0.01, 0.93, 0.08, 0.97],
+            #                            [0.96, 0.09, 0.09, 0.02],
+            #                            [0.97, 0.99, 0.99, 0.99],
+            #                            [0.49, 0.95, 0.95, 0.98],
+            #                            [0.73, 0.36, 0.31, 0.25],
+            #                            [0.98, 0.21, 0.02, 0.05]])
+            # fake_sens = torch.tensor([[0],[0],[0],[1],[1],[1],[1],[1]])
+            # fake_label = torch.tensor([[0,0,1,1],
+            #                            [0,1,0,1],
+            #                            [0,1,0,1],
+            #                            [1,0,1,0],
+            #                            [1,1,1,1],
+            #                            [0,1,1,1],
+            #                            [0,0,0,0],
+            #                            [1,0,0,0]])
+            # fake_label = fake_label.to(torch.float32)
+            # bce_TPR_loss(fake_logit, fake_label, fake_sens)
+            loss = bce_TPR_loss(logit, label, sens, indirect=True)
+            print(loss)
 
-            print("group 1")
-            print(m_pred)
-            print(m_label)
-            print("group 2")
-            print(f_pred)
-            print(f_label)
 
-            pred = torch.where(logit> 0.5, 1, 0)
-            print(pred)
 
 
             break # run only once
@@ -100,7 +109,7 @@ def get_args():
     import argparse
 
     parser = argparse.ArgumentParser(description="Noise training")
-    parser.add_argument("-b", "--batch-size", default=8, type=int, help="batch size for model inputs")
+    parser.add_argument("-b", "--batch-size", default=24, type=int, help="batch size for model inputs")
     parser.add_argument("--epochs", default=125, type=int, help="number of epochs to run")
     parser.add_argument("--resume", default="", help="name of a adversarial element, without .npy")
     parser.add_argument("--start-epoch", default=0, type=int, help="start epoch, it won't do any check with the element loaded")
