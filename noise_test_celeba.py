@@ -42,7 +42,7 @@ def main(args):
     else:
         master = torch.zeros((1, 3, 224, 224)).to(device)
     master = nn.Parameter(master)
-    adversary_optimizer = torch.optim.SGD([master], lr=1e-4, )
+    adversary_optimizer = torch.optim.SGD([master], lr=args.lr, )
     # adversary_scheduler = torch.optim.lr_scheduler.StepLR(adversary_optimizer, step_size=1, gamma=0.921)
 
     # NoiseOverlay
@@ -59,7 +59,12 @@ def main(args):
             adv_image = normalize(adv_image)
             adversary_optimizer.zero_grad()
             logit = model(adv_image)
-            loss = bce_TPR_loss(logit, label, sens, args.target_type, args.policy, args.indirect)
+            # fair_loss = bce_TPR_loss(logit, label, sens, args.target_type, args.policy, args.indirect)
+            fair_loss = loss_EOpp_perturbed(logit, label, sens)
+            # util_loss = native_TPR_loss(logit, label, sens)
+            # alpha = 0.75
+            # loss = alpha*fair_loss + (1-alpha)*util_loss
+            loss = fair_loss
             loss.backward()
             adversary_optimizer.step()
             noise_overlay.clip_by_budget(master)
@@ -141,6 +146,7 @@ def get_args():
 
     parser.add_argument("--model", default="33907_CelebA_0124", help="name of a checkpoint, without .pth")
     parser.add_argument("--name", default="CelebA_noise_cm", help="name to save the stats")
+    parser.add_argument("--lr", default=1e-4, type=float, help="step size for the adversarial element")
     parser.add_argument("--target-type", default="tp", help="target cell be selected for fairness")
     parser.add_argument("--policy", default="buck_only", help="policy on how to mutiply the target cells")
     parser.add_argument("--indirect", default=False, help="boolean value to include cells that have negative label or not")

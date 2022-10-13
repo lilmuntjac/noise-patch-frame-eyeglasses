@@ -2,6 +2,11 @@ import numpy as np
 
 import torch
 import torch.nn.functional as F
+from .perturbations import *
+
+"""
+Fairness testing function
+"""
 
 def filter_celeba_label(label, attr_pred_idx=[2, 19, 21, 31], attr_sens_idx=[20,]):
     """Split the CelebA label into training label and sensitive attribute"""
@@ -92,7 +97,11 @@ def calc_groupacc(pred, label, split):
         assert False, f'Unsupport split attribute'
     return stat.detach().cpu().numpy()
 
-def bce_acc_loss(logit, label, sens, loss_type='diff'):
+"""
+Fairness loss function
+"""
+
+def loss_pq_BCEdiscrepancy(logit, label, sens, loss_type='diff'):
     """
     Binary cross entropy based fairloss for prediction quailty
     Input:
@@ -122,7 +131,49 @@ def bce_acc_loss(logit, label, sens, loss_type='diff'):
     fair_bce = torch.mean(fair_bce)
     return fair_bce
 
-def bce_TPR_loss(logit, label, sens, target_type='tp', policy='buck_only', indirect=False):
+def regroup(tensor, sens):
+    # regroup logit, prediction, or jabel into 2 groups
+    g1_tensor = tensor[sens[:,0]==0]
+    g2_tensor = tensor[sens[:,0]!=0]
+    return g1_tensor, g2_tensor
+
+def calc_tpr(pred, label):
+    # compute true positive rate for prediction from a group
+    # pred, label should be in same shape of (attributes)
+    numerator = torch.sum(pred*label, dim=0) # TP
+    denominator = torch.sum(label, dim=0) # ~TP+FN
+    TPR = torch.full_like(denominator, fill_value=1.0)
+    TPR_mask = (denominator != 0)
+    TPR[TPR_mask] = numerator[TPR_mask]/denominator[TPR_mask]
+    return TPR
+
+def calc_coef(g1_TPR, g2_TPR, buck, boost, ignore=0):
+    # compute coefficient for target cell in 2 groups
+    g1_boost = torch.where(g1_TPR < g2_TPR, boost, ignore)
+    g1_buck = torch.where(g1_TPR > g2_TPR, buck, ignore)
+    g1_coef = g1_boost+g1_buck
+    g2_boost = torch.where(g2_TPR < g1_TPR, boost, ignore)
+    g2_buck = torch.where(g2_TPR > g1_TPR, buck, ignore)
+    g2_coef = g2_boost+g2_buck
+    return g1_coef, g2_coef
+
+def regroup_perturbed(tensor, sens):
+    # regroup prediction and label, 
+    # beware of the new dimension added for the perturbed optimizers
+    g1_tensor = tensor[:, sens[:,0]==0]
+    g2_tensor = tensor[:, sens[:,0]!=0]
+    return g1_tensor, g2_tensor
+
+def calc_perturbed_tpr(pred, label):
+    # the pred and label should include perturbed dimension
+    numerator = torch.sum(pred*label, dim=1) # TP
+    denominator = torch.sum(label, dim=1) # ~TP+FN
+    TPR = torch.full_like(denominator, fill_value=1.0)
+    TPR_mask = (denominator != 0)
+    TPR[TPR_mask] = numerator[TPR_mask]/denominator[TPR_mask]
+    return TPR
+
+def loss_EOpp_BCEmasking(logit, label, sens, target_type='tp', policy='buck_only', indirect=False):
     """
     Binary cross entropy based fairloss for equality on TPR
     Input:
@@ -139,29 +190,6 @@ def bce_TPR_loss(logit, label, sens, target_type='tp', policy='buck_only', indir
         indirect: boolean value to include cells that have negative label or not, default is False
     Output: fairloss for prediction quailty in shape []
     """
-    def regroup(tensor, sens):
-        # regroup logit, prediction, or jabel into 2 groups
-        g1_tensor = tensor[sens[:,0]==0]
-        g2_tensor = tensor[sens[:,0]!=0]
-        return g1_tensor, g2_tensor
-    def calc_tpr(pred, label):
-        # compute true positive rate for prediction from a group
-        # pred, label should be in same shape of (attributes)
-        numerator = torch.sum(pred*label, dim=0) # TP
-        denominator = torch.sum(label, dim=0) # ~TP+FN
-        TPR = torch.full_like(denominator, fill_value=1.0)
-        TPR_mask = (denominator != 0)
-        TPR[TPR_mask] = numerator[TPR_mask]/denominator[TPR_mask]
-        return TPR
-    def calc_coef(g1_TPR, g2_TPR, buck, boost, ignore=0):
-        # compute coefficient for target cell in 2 groups
-        g1_boost = torch.where(g1_TPR < g2_TPR, boost, ignore)
-        g1_buck = torch.where(g1_TPR > g2_TPR, buck, ignore)
-        g1_coef = g1_boost+g1_buck
-        g2_boost = torch.where(g2_TPR < g1_TPR, boost, ignore)
-        g2_buck = torch.where(g2_TPR > g1_TPR, buck, ignore)
-        g2_coef = g2_boost+g2_buck
-        return g1_coef, g2_coef
 
     # compute the coefficient for the BCE loss
     pred = torch.where(logit> 0.5, 1, 0) # just like prediction on CelebA and the Age model
@@ -200,6 +228,62 @@ def bce_TPR_loss(logit, label, sens, target_type='tp', policy='buck_only', indir
         indir_cell = false_positive+true_negative
         g1_indir, g2_inder = regroup(indir_cell, sens)
         indir_loss = torch.cat((g1_bce*g1_indir, g2_bce*g2_inder), 0)
-        return torch.mean(direct_loss+indir_loss)
+        loss = direct_loss+indir_loss
+        return torch.mean(torch.mean(loss, dim=0))
     else:
-        return torch.mean(direct_loss)
+        return torch.mean(torch.mean(direct_loss, dim=0))
+
+def loss_EOpp_direct(logit, label, sens):
+    # direct loss to encourage high TPR
+    pred = torch.where(logit> 0.5, 1, 0) # just like prediction on CelebA and the Age model
+    g1_pred, g2_pred = regroup(pred, sens)
+    g1_label, g2_label = regroup(label, sens)
+    g1_TPR, g2_TPR = calc_tpr(g1_pred, g1_label), calc_tpr(g2_pred, g2_label)
+    loss = 1-g1_TPR + 1-g2_TPR
+    return torch.mean(loss)
+
+def loss_hTPR_perturbed(logit, label, sens):
+    # perturbed loss that encourage higher TPR
+    def hTPR_perturbed_loss(x, label=label, sens=sens):
+        # get prediction from logit
+        pred = torch.where(x> 0.5, 1, 0)
+        # dupe the label to have the same shape as x
+        label_duped = label.repeat(x.shape[0], 1, 1)
+        # regroup prediction and label, 
+        # beware of the new dimension added for the perturbed optimizers
+        g1_pred, g2_pred = regroup_perturbed(pred, sens)
+        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_TPR, g2_TPR = calc_perturbed_tpr(g1_pred, g1_label), calc_perturbed_tpr(g2_pred, g2_label)
+        loss = 1-g1_TPR + 1-g2_TPR
+        return loss
+    # Turns a function into a differentiable one via perturbations
+    pret_tpr = perturbed(hTPR_perturbed_loss,
+                         num_samples=10000,
+                         sigma=0.5,
+                         noise='gumbel',
+                         batched=False)
+    loss = pret_tpr(logit)
+    return torch.mean(loss)
+
+def loss_EOpp_perturbed(logit, label, sens):
+    # perturbed loss that reduce the difference in TPR (for equality of opportunity)
+    def EOpp_perturbed_loss(x, label=label, sens=sens):
+        # get prediction from logit
+        pred = torch.where(x> 0.5, 1, 0)
+        # dupe the label to have the same shape as x
+        label_duped = label.repeat(x.shape[0], 1, 1)
+        # regroup prediction and label, 
+        # beware of the new dimension added for the perturbed optimizers
+        g1_pred, g2_pred = regroup_perturbed(pred, sens)
+        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_TPR, g2_TPR = calc_perturbed_tpr(g1_pred, g1_label), calc_perturbed_tpr(g2_pred, g2_label)
+        loss = torch.abs(g1_TPR-g2_TPR)
+        return loss
+    # Turns a function into a differentiable one via perturbations
+    pret_tpr = perturbed(EOpp_perturbed_loss,
+                         num_samples=10000,
+                         sigma=0.5,
+                         noise='gumbel',
+                         batched=False)
+    loss = pret_tpr(logit)
+    return torch.mean(loss)
