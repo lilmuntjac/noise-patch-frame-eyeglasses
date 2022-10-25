@@ -1,3 +1,4 @@
+# focus on cutoff 
 import time
 import numpy as np
 
@@ -62,11 +63,7 @@ def main(args):
             adv_image = normalize(adv_image)
             adversary_optimizer.zero_grad()
             logit = model(adv_image)
-            fair_loss = loss_EOpp_perturbed(logit, label, sens, mask)
-            # util_loss = native_TPR_loss(logit, label, sens)
-            # alpha = 0.75
-            # loss = alpha*fair_loss + (1-alpha)*util_loss
-            loss = fair_loss
+            loss = loss_EOpp_perturbed_epoch(logit, label, sens, mask, args.composition, args.coef)
             loss.backward()
             adversary_optimizer.step()
             noise_overlay.clip_by_budget(master)
@@ -127,7 +124,7 @@ def main(args):
         mask_list = [0]*4
         for a in range(4):
             _, _, _, equality_of_opportunity, _ = get_basic_stat(a, val_stat_per_epoch)
-            if equality_of_opportunity < 0.02:
+            if equality_of_opportunity < args.threshold:
                 mask_list[a] = 1
         mask = torch.tensor(mask_list).to(device)
         print(mask)
@@ -157,9 +154,14 @@ def get_args():
     parser.add_argument("--model", default="33907_CelebA_0124", help="name of a checkpoint, without .pth")
     parser.add_argument("--name", default="CelebA_noise_cm", help="name to save the stats")
     parser.add_argument("--lr", default=1e-4, type=float, help="step size for the adversarial element")
-    parser.add_argument("--target-type", default="tp", help="target cell be selected for fairness")
+
+    parser.add_argument("--target-type", default="tp_fn", help="target cell be selected for fairness")
     parser.add_argument("--policy", default="buck_only", help="policy on how to mutiply the target cells")
     parser.add_argument("--indirect", default=False, help="boolean value to include cells that have negative label or not")
+
+    parser.add_argument("--composition", default='linear', help="The composition method for fairness and utility loss.")
+    parser.add_argument("--coef", default=1., type=float, help="coefficient multiply on utility loss")
+    parser.add_argument("--threshold", default=0.02, type=float, help="threshold for utility loss to kick-in")
     return parser
 
 if __name__ == '__main__':

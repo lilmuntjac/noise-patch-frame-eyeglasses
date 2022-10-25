@@ -265,7 +265,8 @@ def loss_hTPR_perturbed(logit, label, sens):
     loss = pret_tpr(logit)
     return torch.mean(loss)
 
-def loss_EOpp_perturbed(logit, label, sens):
+def loss_EOpp_perturbed_epoch(logit, label, sens, loss_mask, composition='linear', coef=1.):
+    # epoch based 
     # perturbed loss that reduce the difference in TPR (for equality of opportunity)
     def EOpp_perturbed_loss(x, label=label, sens=sens):
         # get prediction from logit
@@ -285,5 +286,51 @@ def loss_EOpp_perturbed(logit, label, sens):
                          sigma=0.5,
                          noise='gumbel',
                          batched=False)
-    loss = pret_tpr(logit)
+    raw_loss = pret_tpr(logit)
+    # utility loss
+    utility_loss = F.binary_cross_entropy(logit, label, reduction='none')
+    utility_loss = torch.mean(utility_loss, dim=0)
+    if composition == 'linear':
+        loss = raw_loss+utility_loss*loss_mask*coef
+    elif composition == 'exclusive':
+        loss = raw_loss*torch.sub(1, loss_mask) + utility_loss*loss_mask*coef
+    else:
+        assert False, f'Unsupport loss composition'
+    
+    return torch.mean(loss)
+
+def loss_EOpp_perturbed_batch(logit, label, sens, threshold=0.02, composition='linear', coef=1.):
+    # batch based 
+    # perturbed loss that reduce the difference in TPR (for equality of opportunity)
+    def EOpp_perturbed_loss(x, label=label, sens=sens):
+        # get prediction from logit
+        pred = torch.where(x> 0.5, 1, 0)
+        # dupe the label to have the same shape as x
+        label_duped = label.repeat(x.shape[0], 1, 1)
+        # regroup prediction and label, 
+        # beware of the new dimension added for the perturbed optimizers
+        g1_pred, g2_pred = regroup_perturbed(pred, sens)
+        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_TPR, g2_TPR = calc_perturbed_tpr(g1_pred, g1_label), calc_perturbed_tpr(g2_pred, g2_label)
+        loss = torch.abs(g1_TPR-g2_TPR)
+        return loss
+    # Turns a function into a differentiable one via perturbations
+    pret_tpr = perturbed(EOpp_perturbed_loss,
+                         num_samples=10000,
+                         sigma=0.5,
+                         noise='gumbel',
+                         batched=False)
+    raw_loss = pret_tpr(logit)
+    # utility loss
+    utility_loss = F.binary_cross_entropy(logit, label, reduction='none')
+    utility_loss = torch.mean(utility_loss, dim=0)
+    loss_mask = torch.where(raw_loss < threshold, 1, 0)
+
+    if composition == 'linear':
+        loss = raw_loss+utility_loss*loss_mask*coef
+    elif composition == 'exclusive':
+        loss = raw_loss*torch.sub(1, loss_mask) + utility_loss*loss_mask*coef
+    else:
+        assert False, f'Unsupport loss composition'
+    
     return torch.mean(loss)
