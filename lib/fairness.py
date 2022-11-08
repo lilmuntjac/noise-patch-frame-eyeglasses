@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 import numpy as np
 
 import torch
@@ -173,6 +174,15 @@ def calc_perturbed_tpr(pred, label):
     TPR[TPR_mask] = numerator[TPR_mask]/denominator[TPR_mask]
     return TPR
 
+def calc_perturbed_tnr(pred, label):
+    # the pred and label should include perturbed dimension
+    numerator = torch.sum(torch.sub(1, pred)*torch.sub(1, label), dim=1) # TN
+    denominator = torch.sum(torch.sub(1, label), dim=1) # ~FP+TN
+    TNR = torch.full_like(denominator, fill_value=1.0)
+    TNR_mask = (denominator != 0)
+    TNR[TNR_mask] = numerator[TNR_mask]/denominator[TNR_mask]
+    return TNR
+
 def loss_EOpp_BCEmasking(logit, label, sens, target_type='tp', policy='buck_only', indirect=False):
     """
     Binary cross entropy based fairloss for equality on TPR
@@ -334,3 +344,137 @@ def loss_EOpp_perturbed_batch(logit, label, sens, threshold=0.02, composition='l
         assert False, f'Unsupport loss composition'
     
     return torch.mean(loss)
+
+def loss_EO_perturbed_batch(logit, label, sens, coef):
+    # batch based 
+    # perturbed loss that reduce the difference in TPR (for equality of opportunity)
+    def EO_perturbed_loss(x, label=label, sens=sens):
+        # get prediction from logit
+        pred = torch.where(x> 0.5, 1, 0)
+        # dupe the label to have the same shape as x
+        label_duped = label.repeat(x.shape[0], 1, 1)
+        # regroup prediction and label, 
+        # beware of the new dimension added for the perturbed optimizers
+        g1_pred, g2_pred = regroup_perturbed(pred, sens)
+        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_TPR, g2_TPR = calc_perturbed_tpr(g1_pred, g1_label), calc_perturbed_tpr(g2_pred, g2_label)
+        g1_TNR, g2_TNR = calc_perturbed_tnr(g1_pred, g1_label), calc_perturbed_tnr(g2_pred, g2_label)
+        loss = torch.abs(g1_TPR-g2_TPR) + torch.abs(g1_TNR-g2_TNR)
+        return loss
+    # Turns a function into a differentiable one via perturbations
+    pret_tpr = perturbed(EO_perturbed_loss,
+                         num_samples=10000,
+                         sigma=0.5,
+                         noise='gumbel',
+                         batched=False)
+    fair_loss = pret_tpr(logit)
+    # utility loss
+    utility_loss = F.binary_cross_entropy(logit, label, reduction='none')
+    utility_loss = torch.mean(utility_loss, dim=0)
+    # loss_mask = torch.where(raw_loss < threshold, 1, 0)
+
+    loss = fair_loss + coef*utility_loss
+
+    
+    return torch.mean(loss)
+
+def loss_EOpp_perturbed_epoch_b(logit, label, sens, loss_mask, composition='linear', coef=1.):
+    # epoch based 
+    # perturbed loss that reduce the difference in TPR (for equality of opportunity)
+    def EOpp_perturbed_loss(x, label=label, sens=sens):
+        # get prediction from logit
+        pred = torch.where(x> 0.5, 1, 0)
+        # dupe the label to have the same shape as x
+        label_duped = label.repeat(x.shape[0], 1, 1)
+        # regroup prediction and label, 
+        # beware of the new dimension added for the perturbed optimizers
+        g1_pred, g2_pred = regroup_perturbed(pred, sens)
+        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_TPR, g2_TPR = calc_perturbed_tpr(g1_pred, g1_label), calc_perturbed_tpr(g2_pred, g2_label)
+        loss = torch.abs(g1_TPR-g2_TPR)
+        return loss
+    # Turns a function into a differentiable one via perturbations
+    pret_tpr = perturbed(EOpp_perturbed_loss,
+                         num_samples=10000,
+                         sigma=0.5,
+                         noise='gumbel',
+                         batched=False)
+    fair_loss = pret_tpr(logit)
+    # utility loss
+    utility_loss = F.binary_cross_entropy(logit, label, reduction='none')
+    utility_loss = torch.mean(utility_loss, dim=0)
+    # balance the loss by its magnitude
+    f ,u = utility_loss/(fair_loss+utility_loss), fair_loss/(fair_loss+utility_loss)
+    f, u = f.detach(), u.detach()
+
+    if composition == 'linear':
+        loss = fair_loss*f+utility_loss*u*loss_mask*coef
+    elif composition == 'exclusive':
+        loss = fair_loss*torch.sub(1, loss_mask) + utility_loss*loss_mask*coef
+    else:
+        assert False, f'Unsupport loss composition'
+    
+    return torch.mean(loss)
+
+def loss_EOpp_perturbed_adaptive(logit, label, sens, coef):
+    # perturbed loss that reduce the difference in TPR (for equality of opportunity)
+    def EOpp_perturbed_loss(x, label=label, sens=sens):
+        # get prediction from logit
+        pred = torch.where(x> 0.5, 1, 0)
+        # dupe the label to have the same shape as x
+        label_duped = label.repeat(x.shape[0], 1, 1)
+        # regroup prediction and label, 
+        # beware of the new dimension added for the perturbed optimizers
+        g1_pred, g2_pred = regroup_perturbed(pred, sens)
+        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_TPR, g2_TPR = calc_perturbed_tpr(g1_pred, g1_label), calc_perturbed_tpr(g2_pred, g2_label)
+        loss = torch.abs(g1_TPR-g2_TPR)
+        return loss
+    # Turns a function into a differentiable one via perturbations
+    pret_tpr = perturbed(EOpp_perturbed_loss,
+                         num_samples=10000,
+                         sigma=0.5,
+                         noise='gumbel',
+                         batched=False)
+    fair_loss = pret_tpr(logit)
+    # utility loss
+    utility_loss = F.binary_cross_entropy(logit, label, reduction='none')
+    utility_loss = torch.mean(utility_loss, dim=0)
+
+    loss = fair_loss + coef*utility_loss
+    return torch.mean(loss)
+
+def loss_EO_perturbed_adaptive(logit, label, sens, coef):
+    # perturbed loss that reduce the difference in TPR (for equalized odds)
+    def EO_perturbed_loss(x, label=label, sens=sens):
+        # get prediction from logit
+        pred = torch.where(x> 0.5, 1, 0)
+        # dupe the label to have the same shape as x
+        label_duped = label.repeat(x.shape[0], 1, 1)
+        # regroup prediction and label, 
+        # beware of the new dimension added for the perturbed optimizers
+        g1_pred, g2_pred = regroup_perturbed(pred, sens)
+        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_TPR, g2_TPR = calc_perturbed_tpr(g1_pred, g1_label), calc_perturbed_tpr(g2_pred, g2_label)
+        g1_TNR, g2_TNR = calc_perturbed_tnr(g1_pred, g1_label), calc_perturbed_tnr(g2_pred, g2_label)
+        loss = torch.abs(g1_TPR-g2_TPR) + torch.abs(g1_TNR-g2_TNR)
+        return loss
+    # Turns a function into a differentiable one via perturbations
+    pret_tpr_tnr = perturbed(EO_perturbed_loss,
+                         num_samples=10000,
+                         sigma=0.5,
+                         noise='gumbel',
+                         batched=False)
+    fair_loss = pret_tpr_tnr(logit)
+    # utility loss
+    utility_loss = F.binary_cross_entropy(logit, label, reduction='none')
+    utility_loss = torch.mean(utility_loss, dim=0)
+
+    loss = fair_loss + coef*utility_loss
+    return torch.mean(loss)
+
+@dataclass
+class EO_adaptive:
+    """Loss function by batch"""
+
+    
