@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from lib.datasets import UTKface
+from lib.datasets import UTKFace
 from lib.models import UTKfaceModel
 from lib.fairness import *
 from lib.utils import *
@@ -18,7 +18,7 @@ def main(args):
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
     # dataset, dataloader (UTKFace)
-    utkface = UTKface(batch_size=args.batch_size)
+    utkface = UTKFace(batch_size=args.batch_size)
     train_dataloader = utkface.train_dataloader
     val_dataloader = utkface.val_dataloader
     # model, optimizer, and scheduler
@@ -28,6 +28,8 @@ def main(args):
         weight_decay=1e-5, momentum=0.9,
     )
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.921)
+    model_ckpt_path = Path(args.model_ckpt_root)/args.model_name
+    model_stat_path = Path(args.model_stat_root)/args.model_name
     if args.resume:
         model, optimizer, scheduler = load_model(model, optimizer, scheduler, name=args.resume, root_folder=model_ckpt_path)
         train_stat = load_stats(name=args.model_name+'_train', root_folder=model_stat_path)
