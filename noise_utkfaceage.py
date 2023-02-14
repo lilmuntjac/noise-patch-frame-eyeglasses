@@ -70,9 +70,9 @@ def main(args):
             elif args.loss_type == 'BCE masking':
                 loss = loss_binary_BCEmasking(args.fairness_matrix, logit, label, sens)
             elif args.loss_type == 'perturbOptim':
-                loss = loss_perturbOptim(args.fairness_matrix, logit, label, sens, p_coef, n_coef)
+                loss = loss_binary_perturbOptim(args.fairness_matrix, logit, label, sens, p_coef, n_coef)
             elif args.loss_type == 'perturbOptimFull':
-                loss = loss_perturbOptim_full(args.fairness_matrix, logit, label, sens, p_coef, n_coef)
+                loss = loss_binary_perturbOptim_full(args.fairness_matrix, logit, label, sens, p_coef, n_coef)
             else:
                 assert False, f'Unsupport loss type'
             loss.backward()

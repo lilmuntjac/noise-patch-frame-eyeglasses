@@ -10,8 +10,8 @@ class NoiseOverlay:
     """
     """
 
-    def __init__(self, barch_size=128, width=224, budget=0.1, device='cuda'):
-        self.batch_size = barch_size
+    def __init__(self, batch_size=128, width=224, budget=0.1, device='cuda'):
+        self.batch_size = batch_size
         self.width = width
         self.budget = budget
         self.device = device

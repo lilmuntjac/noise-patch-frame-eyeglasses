@@ -252,7 +252,7 @@ def loss_binary_BCEmasking(state_of_fairness, logit, label, sens_attr):
         assert False, f'Unsupport state of fairness'
     return torch.mean(loss)
 
-def loss_perturbOptim(state_of_fairness, logit, label, sens_attr, p_coef=0, n_coef=0):
+def loss_binary_perturbOptim(state_of_fairness, logit, label, sens_attr, p_coef=0, n_coef=0):
     """
     Epoch based, Write the fairness loss directly and warp it with perturbMAP
     """ 
@@ -321,7 +321,7 @@ def loss_perturbOptim(state_of_fairness, logit, label, sens_attr, p_coef=0, n_co
         assert False, f'Unsupport state of fairness'
     return torch.mean(loss)
 
-def loss_perturbOptim_full(state_of_fairness, logit, label, sens_attr, p_coef=0, n_coef=0):
+def loss_binary_perturbOptim_full(state_of_fairness, logit, label, sens_attr, p_coef=0, n_coef=0):
     """
     Epoch based, Write the fairness loss directly and warp it with perturbMAP
     """ 

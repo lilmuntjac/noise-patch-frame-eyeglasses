@@ -29,7 +29,7 @@ class CelebAModel(torch.nn.Module):
         z = self.model(x)
         return z
 
-class UTKfaceModel(torch.nn.Module):
+class UTKFaceModel(torch.nn.Module):
     """
     UTKface attributes (race, gender, age) predictions
     race: white, black, asian, indian, others -> [0:5]
@@ -38,7 +38,7 @@ class UTKfaceModel(torch.nn.Module):
     """
 
     def __init__(self, out_feature=16, weights='MobileNet_V3_Small_Weights.DEFAULT'):
-        super(UTKfaceModel, self).__init__()
+        super(UTKFaceModel, self).__init__()
         self.model = models.mobilenet_v3_small(weights=weights)
         in_feature = self.model.classifier[0].in_features
         self.model.classifier = nn.Sequential(OrderedDict([

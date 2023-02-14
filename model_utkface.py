@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from lib.datasets import UTKFace
-from lib.models import UTKfaceModel
+from lib.models import UTKFaceModel
 from lib.fairness import *
 from lib.utils import *
 
@@ -22,7 +22,7 @@ def main(args):
     train_dataloader = utkface.train_dataloader
     val_dataloader = utkface.val_dataloader
     # model, optimizer, and scheduler
-    model = UTKfaceModel(weights=None).to(device)
+    model = UTKFaceModel(weights=None).to(device)
     optimizer = torch.optim.RMSprop(
         model.parameters(), lr=args.lr, alpha=0.9, eps=0.0316, 
         weight_decay=1e-5, momentum=0.9,

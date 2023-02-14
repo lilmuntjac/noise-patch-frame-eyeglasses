@@ -25,7 +25,7 @@ def main(args):
     # base model, base model optimizer, and base model scheduler
     model = AgeModel(weights=None).to(device)
     optimizer = torch.optim.RMSprop(
-        model.parameters(), lr=0.064, alpha=0.9, eps=0.0316, 
+        model.parameters(), lr=args.lr, alpha=0.9, eps=0.0316, 
         weight_decay=1e-5, momentum=0.9,
     )
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.921)
@@ -70,9 +70,9 @@ def main(args):
             elif args.loss_type == 'BCE masking':
                 loss = loss_binary_BCEmasking(args.fairness_matrix, logit, label, sens)
             elif args.loss_type == 'perturbOptim':
-                loss = loss_perturbOptim(args.fairness_matrix, logit, label, sens, p_coef, n_coef)
+                loss = loss_binary_perturbOptim(args.fairness_matrix, logit, label, sens, p_coef, n_coef)
             elif args.loss_type == 'perturbOptimFull':
-                loss = loss_perturbOptim_full(args.fairness_matrix, logit, label, sens, p_coef, n_coef)
+                loss = loss_binary_perturbOptim_full(args.fairness_matrix, logit, label, sens, p_coef, n_coef)
             else:
                 assert False, f'Unsupport loss type'
             loss.backward()
