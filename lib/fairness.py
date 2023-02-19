@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from .perturbations import *
 
 """
-Fairness testing function
+Fairness testing function (binary attributes)
 """
 
 def filter_celeba_label(label, attr_pred_idx=[2, 19, 21, 31], attr_sens_idx=[20,]):
@@ -15,7 +15,7 @@ def filter_celeba_label(label, attr_pred_idx=[2, 19, 21, 31], attr_sens_idx=[20,
     return label[:,attr_pred_idx], label[:,attr_sens_idx]
 
 def filter_agemodel_label(label):
-    """Split the UTKface, FairFace label into training label and sensitive attribute"""
+    """Split the UTKFace, FairFace label into training label and sensitive attribute"""
     # in age model, training label is age, sensitive attrribute is gender
     # also we need to binarized the age label
     binary_age = torch.where(label[:,2:3]>3, 1, 0) # keep the shape as (N, 1)
@@ -26,13 +26,13 @@ def to_prediction(logit, model_name=None):
     Convert the logit into prediction for UTKface and FairFace model
     Input:
         logit: model output from UTKface model and FairFace model
-        model_name: the name of the model, only "CelebA", "UTKface", "FairFace", and "AgeModel" are allowed
+        model_name: the name of the model, only "CelebA", "UTKFace", "FairFace", and "AgeModel" are allowed
     Output:
         A torch tensor in shape (N, attributes)
     """
     if model_name == 'CelebA' or model_name == 'AgeModel':
         pred = torch.where(logit> 0.5, 1, 0)
-    elif model_name == 'UTKface':
+    elif model_name == 'UTKFace':
         _, race_pred = torch.max(logit[:,0:5], dim=1)
         _, gender_pred = torch.max(logit[:,5:7], dim=1)
         _, age_pred = torch.max(logit[:,7:16], dim=1)
@@ -99,7 +99,7 @@ def calc_groupacc(pred, label, split):
     return stat.detach().cpu().numpy()
 
 """
-Fairness loss function
+Fairness loss function (binary attributes)
 """
 
 def regroup(tensor, sens):
@@ -441,3 +441,113 @@ def loss_binary_perturbOptim_full(state_of_fairness, logit, label, sens_attr, p_
     else:
         assert False, f'Unsupport state of fairness'
     return torch.mean(loss)
+
+"""
+Fairness testing function (categorical attributes)
+"""
+
+def filter_utkface_logit(logit):
+    """Split the UTKFace logit into race, gender, and age"""
+    return logit[:, 0:5], logit[:, 5:7], logit[:, 7:16]
+
+def filter_fairface_logit(logit):
+    """Split the FairFace logit into race, gender, and age"""
+    return logit[:, 0:7], logit[:, 7:9], logit[:, 9:18]
+
+def regroup_by_senstype(pred, label, sens_type):
+    # pred and label should in shape (N, 3) as a whole.
+    if sens_type == "race":
+        white_pred   = pred[label[:,0]==0]
+        nwhite_pred  = pred[label[:,0]!=0]
+        white_label  = label[label[:,0]==0]
+        nwhite_label = label[label[:,0]!=0]
+        return white_pred, white_label, nwhite_pred, nwhite_label
+    elif sens_type == "gender":
+        male_pred   = pred[label[:,1]==0]
+        female_pred  = pred[label[:,1]!=0]
+        male_label  = label[label[:,1]==0]
+        female_label = label[label[:,1]!=0]
+        return male_pred, male_label, female_pred, female_label
+    elif sens_type == "age":
+        young_pred = pred[label[:,2]<=3]
+        senior_pred = pred[label[:,2]>3]
+        young_label = label[label[:,2]<=3]
+        senior_label = label[label[:,2]>3]
+        return young_pred, young_label, senior_pred, senior_label
+    else:
+        assert False, f'no such sensitive attribute'
+
+def calc_grouppq(pred, label, sens_type, attr_type):
+    """
+    Split the prediction and the corresponding label by its sensitive attribute type,
+    then compute the prediciton quaility for them
+    """
+    # pred and label should in shape (N, 3) as a whole.
+    group_1_pred, group_1_label, gropu_2_pred, gropu_2_label = regroup_by_senstype(pred, label, sens_type)
+    group_1_total, group_2_total = group_1_label.shape[0], gropu_2_label.shape[0]
+    group_1_correct = torch.sum(torch.eq(group_1_pred, group_1_label), dim=0)
+    group_1_wrong = group_1_total-group_1_correct
+    group_2_correct = torch.sum(torch.eq(gropu_2_pred, gropu_2_label), dim=0)
+    group_2_wrong = group_2_total-group_2_correct
+    result = torch.stack((group_1_correct, group_1_wrong, group_2_correct, group_2_wrong), dim=1)
+    return result.clone().detach().cpu().numpy()
+
+"""
+Fairness loss function (categorical attributes)
+"""
+
+def loss_categori_direct(logit, label, sens_type, attr_type, coef, model_name=None):
+    """
+    Write the fairness loss directly defined by the fairness matrix
+    Input: 
+        logit: model output from model that made binary predictions
+        label: training label from the dataset
+        sens_type: sensitive attribute from the dataset,
+            race: white or non-white 
+            gander: male or female
+            age: age <= 30 or age > 30
+        attr_type: attribute type that fairness (accuracy) is evaluated on,
+                   it could be "all", "race", "gender", or "age".
+        coef: coeficient for cross entropy loss
+        model_name: specify the model used. It could be "UTKFace" or "FairFace"
+    Output:
+        fairness loss in shape []
+    """
+    if model_name == "UTKFace":
+        race_logit, gender_logit, age_logit = filter_utkface_logit(logit)
+    elif model_name == "FairFace":
+        race_logit, gender_logit, age_logit = filter_fairface_logit(logit)
+    else:
+        assert False, f'undefined model name'
+    # prediction and cross entropy loss
+    pred = to_prediction(logit, model_name)
+    loss_CE_race = F.cross_entropy(race_logit, label[:,0])
+    loss_CE_gender = F.cross_entropy(gender_logit, label[:,1])
+    loss_CE_age = F.cross_entropy(age_logit, label[:,2])
+    # regroup logit and label by sensitive attribute type & compute accuracy
+    group_1_pred, group_1_label, gropu_2_pred, gropu_2_label = regroup_by_senstype(pred, label, sens_type)
+    group_1_total, group_2_total = group_1_label.shape[0], gropu_2_label.shape[0]
+    if attr_type == "all":
+        group_1_correct = torch.all(torch.eq(group_1_pred, group_1_label), dim=1).sum()
+        group_2_correct = torch.all(torch.eq(gropu_2_pred, gropu_2_label), dim=1).sum()
+        loss_CE = loss_CE_race+loss_CE_gender+loss_CE_age
+    elif attr_type == "race":
+        group_1_correct = torch.eq(group_1_pred, group_1_label)[:,0].sum()
+        group_2_correct = torch.eq(gropu_2_pred, gropu_2_label)[:,0].sum()
+        loss_CE = loss_CE_race
+    elif attr_type == "gender":
+        group_1_correct = torch.eq(group_1_pred, group_1_label)[:,1].sum()
+        group_2_correct = torch.eq(gropu_2_pred, gropu_2_label)[:,1].sum()
+        loss_CE = loss_CE_gender
+    elif attr_type == "age":
+        group_1_correct = torch.eq(group_1_pred, group_1_label)[:,2].sum()
+        group_2_correct = torch.eq(gropu_2_pred, gropu_2_label)[:,2].sum()
+        loss_CE = loss_CE_age
+    else:
+        assert False, f'no such attribute'
+    # regourp logit by sensitive attribute
+    group_1_acc, group_2_acc = group_1_correct/(group_1_total+1e-9), group_2_correct/(group_2_total+1e-9)
+    direct_loss = torch.abs(group_1_acc-group_2_acc)
+    loss = direct_loss+coef*loss_CE
+    return loss
+

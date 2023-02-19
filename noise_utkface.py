@@ -48,8 +48,7 @@ def main(args):
     # adversary_scheduler = torch.optim.lr_scheduler.StepLR(adversary_optimizer, step_size=1, gamma=0.921)
     noise_overlay = NoiseOverlay()
     # coefficient of the recovery loss
-    p_coef = torch.tensor(args.p_coef).to(device)
-    n_coef = torch.tensor(args.n_coef).to(device)
+    coef = torch.tensor(args.coef).to(device)
     total_time = time.time() - start_time
     print(f'Preparation done in {total_time:.4f} secs')
 
@@ -64,8 +63,97 @@ def main(args):
             adv_image = normalize(adv_image)
             adversary_optimizer.zero_grad()
             logit = model(adv_image)
-            
-    
+            loss = loss_categori_direct(logit, label, args.sens_type, args.attr_type, coef, 'UTKFace')
+            loss.backward()
+            adversary_optimizer.step()
+            noise_overlay.clip_by_budget(master)
+            # collecting performance information
+            pred = to_prediction(logit, model_name='UTKFace')
+            stat = calc_grouppq(pred, label, args.sens_type, args.attr_type)
+            stat = stat[np.newaxis, :]
+            train_stat = train_stat+stat if len(train_stat) else stat
+        return train_stat # in shape (1, attribute, 4) 2 group, correct and wrong
+    def val(dataloader=val_dataloader):
+        val_stat = np.array([])
+        model.eval()
+        with torch.no_grad():
+            # validaton loop
+            for batch_idx, (data, label) in enumerate(dataloader):
+                data, label = data.to(device), label.to(device)
+                adv_image, label = noise_overlay.apply(data, label, master)
+                adv_image = normalize(adv_image)
+                logit = model(adv_image)
+                # collecting performance information
+                pred = to_prediction(logit, model_name='UTKFace')
+                stat = calc_grouppq(pred, label, args.sens_type, args.attr_type)
+                stat = stat[np.newaxis, :]
+                val_stat = val_stat+stat if len(val_stat) else stat
+                return val_stat # in shape (1, attribute, 4)
+    # summarize the status in validation set for some adjustment
+    def get_stats_per_epoch(stat):
+        # Input: statistics for a single epochs, shape (1, attributes, 4)
+        # 4 being group_1_correct, group_1_wrong, group_2_correct, group_2_wrong
+        group_1_correct, group_1_wrong, group_2_correct, group_2_wrong = [stat[0,:,i] for i in range(4)]
+        group_1_total, group_2_total = group_1_correct+group_1_wrong, group_2_correct+group_2_wrong
+        group_1_acc, group_2_acc = group_1_correct/group_1_total, group_2_correct/group_2_total
+        diff_prediction_quaility = abs(group_1_acc-group_2_acc)
+        total_acc = (group_1_correct+group_2_correct)/(group_1_total+group_2_total)
+        stat_dict = {"group_1_acc": group_1_acc ,"group_2_acc": group_2_acc, "total_acc": total_acc,
+                     "diff_pq": diff_prediction_quaility}
+        return stat_dict
+
+    print(f'Start training noise')
+    start_time = time.time()
+
+    if not args.resume:
+        train_stat_per_epoch = val(train_dataloader)
+        val_stat_per_epoch = val()
+        train_stat = np.concatenate((train_stat, train_stat_per_epoch), axis=0) if len(train_stat) else train_stat_per_epoch
+        val_stat = np.concatenate((val_stat, val_stat_per_epoch), axis=0) if len(val_stat) else val_stat_per_epoch
+    init_tacc = get_stats_per_epoch(val_stat[0:1,:,:])["total_acc"]
+
+    # training loop
+    for epoch in range(args.start_epoch, args.epochs):
+        print(f'Epoch: {epoch:02d}')
+        train_stat_per_epoch = train()
+        # adversary_scheduler.step()
+        val_stat_per_epoch = val()
+        train_stat = np.concatenate((train_stat, train_stat_per_epoch), axis=0) if len(train_stat) else train_stat_per_epoch
+        val_stat = np.concatenate((val_stat, val_stat_per_epoch), axis=0) if len(val_stat) else val_stat_per_epoch
+        stat_dict = get_stats_per_epoch(val_stat_per_epoch)
+        # For special loss that adjust the coefficient base on fairness status
+        if args.coef_mode == "dynamic":
+            last_epoch_stat = val_stat[-2:-1,:,:]
+            last_state_dict = get_stats_per_epoch(last_epoch_stat)
+            curr_tacc, last_tacc = stat_dict["total_acc"], last_state_dict["total_acc"]
+            curr_pq, last_pq = stat_dict["diff_pq"], last_state_dict["diff_pq"]
+            # print the coefficient
+            coef_list = coef.clone().cpu().numpy().tolist()
+            coef_list = [f'{f:.4f}' for f in coef_list]
+            print(f'    coef: {" ".join(coef_list)}')
+            for a in range(coef.shape[0]): # all attributes
+                if curr_tacc[a] < init_tacc[a] - args.quality_target:
+                    coef[a] = min(coef[a]*1.05, 1e3)
+                elif curr_pq[a] > args.fairness_target and curr_pq[a] > last_pq[a]:
+                    coef[a] = max(coef[a]*0.95, 1e-3)
+        #
+        for a in range(coef.shape[0]): # all attributes
+            group_1_acc, group_2_acc, total_acc, diff_pq = stat_dict['group_1_acc'][a], stat_dict['group_2_acc'][a], stat_dict['total_acc'][a], stat_dict['diff_pq'][a]
+            # print the training status and whether it meet the goal set by argument
+            status = ''
+            if total_acc < init_tacc[a] - args.quality_target:
+                status += ' [low accuracy]'
+            if diff_pq > args.fairness_target:
+                status += ' [not fair enough]'
+            print(f'    {group_1_acc:.4f} - {group_2_acc:.4f} - {total_acc:.4f} -- {diff_pq:.4f}  {status}')
+        # save the noise for each epoch
+        noise = master.detach().cpu().numpy()
+        save_stats(noise, f'{args.noise_name}_{epoch:04d}', root_folder=noise_ckpt_path)
+    # save basic statistic
+    save_stats(train_stat, f'{args.noise_name}_train', root_folder=noise_stat_path)
+    save_stats(val_stat, f'{args.noise_name}_val', root_folder=noise_stat_path)
+    total_time = time.time() - start_time
+    print(f'Training time: {total_time/60:.4f} mins')
 
 def get_args():
     import argparse
@@ -88,10 +176,11 @@ def get_args():
     parser.add_argument("--resume", default="", help="name of a adversarial element, without .npy")
     parser.add_argument("--start-epoch", default=0, type=int, help="start epoch, it won't do any check on the element loaded")
     # fairness parameter
-    parser.add_argument("--fairness-matrix", default="equality of opportunity", help="how to measure fairness")
-    parser.add_argument("--coef-mode", default="fix", type=str, help="method to adjust p-coef and n-coef durinig training")
-    parser.add_argument("--p-coef", default=[0.1,], type=float, nargs='+', help="coefficient multiply on positive recovery loss, need to be match with the number of attributes")
-    parser.add_argument("--n-coef", default=[0.1,], type=float, nargs='+', help="coefficient multiply on negative recovery loss, need to be match with the number of attributes")
+    # parser.add_argument("--fairness-matrix", default="prediction quaility", help="how to measure fairness")
+    parser.add_argument("--sens-type", default="race", type=str, help="sensitive attribute to divide the dataset into 2 group")
+    parser.add_argument("--attr-type", default="all", type=str, help="attribute that fairness is evaluated on")
+    parser.add_argument("--coef-mode", default="fix", type=str, help="method to adjust coef durinig training")
+    parser.add_argument("--coef", default=[0.1,], type=float, nargs='+', help="coefficient multiply on recovery loss, need to be match with the number of attributes")
     parser.add_argument("--fairness-target", default=0.03, type=float, help="Fairness target value")
     parser.add_argument("--quality-target", default=0.05, type=float, help="Max gap loss for prediction quaility")
     # method taken

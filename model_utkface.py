@@ -54,7 +54,7 @@ def main(args):
             loss.backward()
             optimizer.step()
             # collecting performance information
-            pred =  to_prediction(logit, model_name='UTKface')
+            pred =  to_prediction(logit, model_name='UTKFace')
             stat = calc_groupacc(pred, label, split='race')
             stat = stat[np.newaxis, :]
             train_stat = train_stat+stat if len(train_stat) else stat
@@ -71,7 +71,7 @@ def main(args):
                 optimizer.zero_grad()
                 logit = model(instance)
                 # collecting performance information
-                pred =  to_prediction(logit, model_name='UTKface')
+                pred =  to_prediction(logit, model_name='UTKFace')
                 stat = calc_groupacc(pred, label, split='race')
                 stat = stat[np.newaxis, :]
                 val_stat = val_stat+stat if len(val_stat) else stat
