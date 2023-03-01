@@ -63,16 +63,25 @@ def main(args):
             adv_image = normalize(adv_image)
             adversary_optimizer.zero_grad()
             logit = model(adv_image)
-            loss = loss_categori_direct(logit, label, args.sens_type, args.attr_type, coef, 'UTKFace')
+            if args.loss_type == 'direct':
+                loss = loss_categori_direct(logit, label, args.sens_type, args.attr_type, coef, 'UTKFace')
+            elif args.loss_type == 'CE masking':
+                loss = loss_categori_CEmasking(logit, label, args.sens_type, args.attr_type, 'UTKFace')
+            elif args.loss_type == 'perturbOptim':
+                loss = loss_categori_perturbOptim(logit, label, args.sens_type, args.attr_type, coef, 'UTKFace')
+            elif args.loss_type == 'perturbOptimFull':
+                loss = loss_categori_perturbOptim_full(logit, label, args.sens_type, args.attr_type, coef, 'UTKFace')
+            else:
+                assert False, f'Unsupport loss type'
             loss.backward()
             adversary_optimizer.step()
             noise_overlay.clip_by_budget(master)
             # collecting performance information
             pred = to_prediction(logit, model_name='UTKFace')
-            stat = calc_grouppq(pred, label, args.sens_type, args.attr_type)
+            stat = calc_grouppq(pred, label, args.sens_type)
             stat = stat[np.newaxis, :]
             train_stat = train_stat+stat if len(train_stat) else stat
-        return train_stat # in shape (1, attribute, 4) 2 group, correct and wrong
+        return train_stat # in shape (1, attribute+1, 4) 2 group, correct and wrong, the extra attribute is 'all'
     def val(dataloader=val_dataloader):
         val_stat = np.array([])
         model.eval()
@@ -85,10 +94,10 @@ def main(args):
                 logit = model(adv_image)
                 # collecting performance information
                 pred = to_prediction(logit, model_name='UTKFace')
-                stat = calc_grouppq(pred, label, args.sens_type, args.attr_type)
+                stat = calc_grouppq(pred, label, args.sens_type)
                 stat = stat[np.newaxis, :]
                 val_stat = val_stat+stat if len(val_stat) else stat
-                return val_stat # in shape (1, attribute, 4)
+                return val_stat # in shape (1, attribute+1, 4), the extra attribute is 'all'
     # summarize the status in validation set for some adjustment
     def get_stats_per_epoch(stat):
         # Input: statistics for a single epochs, shape (1, attributes, 4)
@@ -96,7 +105,7 @@ def main(args):
         group_1_correct, group_1_wrong, group_2_correct, group_2_wrong = [stat[0,:,i] for i in range(4)]
         group_1_total, group_2_total = group_1_correct+group_1_wrong, group_2_correct+group_2_wrong
         group_1_acc, group_2_acc = group_1_correct/group_1_total, group_2_correct/group_2_total
-        diff_prediction_quaility = abs(group_1_acc-group_2_acc)
+        diff_prediction_quaility = abs(group_1_acc-group_2_acc) # in shape (A)
         total_acc = (group_1_correct+group_2_correct)/(group_1_total+group_2_total)
         stat_dict = {"group_1_acc": group_1_acc ,"group_2_acc": group_2_acc, "total_acc": total_acc,
                      "diff_pq": diff_prediction_quaility}
@@ -131,13 +140,22 @@ def main(args):
             coef_list = coef.clone().cpu().numpy().tolist()
             coef_list = [f'{f:.4f}' for f in coef_list]
             print(f'    coef: {" ".join(coef_list)}')
-            for a in range(coef.shape[0]): # all attributes
-                if curr_tacc[a] < init_tacc[a] - args.quality_target:
-                    coef[a] = min(coef[a]*1.05, 1e3)
-                elif curr_pq[a] > args.fairness_target and curr_pq[a] > last_pq[a]:
-                    coef[a] = max(coef[a]*0.95, 1e-3)
+            # adjust the coefficient by the loss type
+            if coef.shape[0] == 1:
+                attr2id = {'race': 0, 'gender': 1, 'age': 2, 'all': 3}
+                if curr_tacc[attr2id[args.attr_type]] < init_tacc[attr2id[args.attr_type]] - args.quality_target:
+                    coef[0] = min(coef[0]*1.05, 1e3)
+                elif curr_pq[attr2id[args.attr_type]] > args.fairness_target and curr_pq[attr2id[args.attr_type]] > last_pq[attr2id[args.attr_type]]:
+                    coef[0] = max(coef[0]*0.95, 1e-3)
+            else:
+                for a in range(coef.shape[0]): # all attributes
+                    if curr_tacc[a] < init_tacc[a] - args.quality_target:
+                        coef[a] = min(coef[a]*1.05, 1e3)
+                    elif curr_pq[a] > args.fairness_target and curr_pq[a] > last_pq[a]:
+                        coef[a] = max(coef[a]*0.95, 1e-3)
         #
-        for a in range(coef.shape[0]): # all attributes
+        attr2id = {'race': 0, 'gender': 1, 'age': 2, 'all': 3}
+        for a in range(4): # all attributes, include 'all'
             group_1_acc, group_2_acc, total_acc, diff_pq = stat_dict['group_1_acc'][a], stat_dict['group_2_acc'][a], stat_dict['total_acc'][a], stat_dict['diff_pq'][a]
             # print the training status and whether it meet the goal set by argument
             status = ''
@@ -145,7 +163,11 @@ def main(args):
                 status += ' [low accuracy]'
             if diff_pq > args.fairness_target:
                 status += ' [not fair enough]'
-            print(f'    {group_1_acc:.4f} - {group_2_acc:.4f} - {total_acc:.4f} -- {diff_pq:.4f}  {status}')
+            if args.attr_type != 'all' and attr2id[args.attr_type] == a:
+                status += ' *'
+            if args.attr_type == 'all':
+                status += ' *'
+            print(f'    {group_1_acc:.4f} - {group_2_acc:.4f} - {total_acc:.4f} -- {diff_pq:.4f}{status}')
         # save the noise for each epoch
         noise = master.detach().cpu().numpy()
         save_stats(noise, f'{args.noise_name}_{epoch:04d}', root_folder=noise_ckpt_path)
@@ -180,7 +202,7 @@ def get_args():
     parser.add_argument("--sens-type", default="race", type=str, help="sensitive attribute to divide the dataset into 2 group")
     parser.add_argument("--attr-type", default="all", type=str, help="attribute that fairness is evaluated on")
     parser.add_argument("--coef-mode", default="fix", type=str, help="method to adjust coef durinig training")
-    parser.add_argument("--coef", default=[0.1,], type=float, nargs='+', help="coefficient multiply on recovery loss, need to be match with the number of attributes")
+    parser.add_argument("--coef", default=[0.1,], type=float, nargs='+', help="coefficient multiply on recovery loss, must match the number of losses used")
     parser.add_argument("--fairness-target", default=0.03, type=float, help="Fairness target value")
     parser.add_argument("--quality-target", default=0.05, type=float, help="Max gap loss for prediction quaility")
     # method taken
