@@ -9,7 +9,7 @@ from torchvision.utils import save_image
 from lib.datasets import CelebA
 from lib.models import CelebAModel
 from lib.fabricator import NoiseOverlay
-from lib.fairness import *
+from lib.fairnessBinary import *
 from lib.utils import *
 
 def main(args):

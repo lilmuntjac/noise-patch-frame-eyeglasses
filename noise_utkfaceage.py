@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from lib.datasets import UTKFace
 from lib.models import AgeModel
 from lib.fabricator import NoiseOverlay
-from lib.fairness import *
+from lib.fairnessBinary import *
 from lib.utils import *
 
 def main(args):

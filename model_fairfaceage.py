@@ -7,7 +7,6 @@ import torch.nn.functional as F
 
 from lib.datasets import FairFace
 from lib.models import AgeModel
-from lib.fairness import *
 from lib.utils import *
 
 def main(args):
