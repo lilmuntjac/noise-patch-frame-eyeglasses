@@ -5,17 +5,18 @@ import torch
 import torch.nn.functional as F
 from .perturbations import *
 
-def regroup(tensor, sens):
-    # regroup logit, prediction, or label into 2 groups
-    g1_tensor = tensor[sens[:,0]==0]
-    g2_tensor = tensor[sens[:,0]!=0]
-    return g1_tensor, g2_tensor
-
-def regroup_perturbed(tensor, sens):
-    # regroup prediction and label, 
-    # beware of the new dimension added for the perturbed optimizers
-    g1_tensor = tensor[:, sens[:,0]==0]
-    g2_tensor = tensor[:, sens[:,0]!=0]
+def regroup_binary(tensor, sens, batch_dim=0):
+    """
+    Regroup losses, logit, prediction, or label into 2 groups by sensitive attribute
+    """
+    if batch_dim == 0:
+        g1_tensor = tensor[sens[:,0]==0]
+        g2_tensor = tensor[sens[:,0]!=0]
+    elif batch_dim == 1:
+        g1_tensor = tensor[:, sens[:,0]==0]
+        g2_tensor = tensor[:, sens[:,0]!=0]
+    else:
+        assert False, f'batch dimension must be 0 or 1'
     return g1_tensor, g2_tensor
 
 def get_TPR(pred, label, dim=0):
@@ -106,8 +107,8 @@ def loss_binary_direct(state_of_fairness, logit, label, sens_attr, p_coef=0, n_c
     # get and regroup the predictions
     # pred = torch.where(logit> 0.5, 1, 0) # gradient can't pass through this function
     pred = 1./(1+torch.exp(-1e5*logit))
-    g1_pred, g2_pred = regroup(pred, sens_attr)
-    g1_label, g2_label = regroup(label, sens_attr)
+    g1_pred, g2_pred = regroup_binary(pred, sens_attr, 0)
+    g1_label, g2_label = regroup_binary(label, sens_attr, 0)
     if state_of_fairness == 'equality of opportunity':
         g1_TPR, g2_TPR = get_TPR(g1_pred, g1_label, dim=0), get_TPR(g2_pred, g2_label, dim=0)
         TPR_loss = torch.abs(g1_TPR-g2_TPR)
@@ -132,11 +133,11 @@ def loss_binary_BCEmasking(state_of_fairness, logit, label, sens_attr):
     For prediction quaility, buck all the cells belong to the advantage group
     """
     loss_BCE = F.binary_cross_entropy(logit, label, reduction='none')
-    g1_BCE, g2_BCE = regroup(loss_BCE, sens_attr)
+    g1_BCE, g2_BCE = regroup_binary(loss_BCE, sens_attr, 0)
     # find the advantage group and the target mask
     pred = torch.where(logit> 0.5, 1, 0)
-    g1_pred, g2_pred = regroup(pred, sens_attr)
-    g1_label, g2_label = regroup(label, sens_attr)
+    g1_pred, g2_pred = regroup_binary(pred, sens_attr, 0)
+    g1_label, g2_label = regroup_binary(label, sens_attr, 0)
     if state_of_fairness ==  'equality of opportunity':
         g1_TPR, g2_TPR = get_TPR(g1_pred, g1_label, dim=0), get_TPR(g2_pred, g2_label, dim=0)
         g1_p_coef, g2_p_coef= torch.where(g1_TPR > g2_TPR, -1, 0), torch.where(g2_TPR > g1_TPR, -1, 0)
@@ -173,8 +174,8 @@ def loss_binary_perturbOptim(state_of_fairness, logit, label, sens_attr, p_coef=
         # dupe the label to have the same shape as x
         label_duped = label.repeat(x.shape[0], 1, 1)
         # regroup and compute TPR for both groups
-        g1_pred, g2_pred = regroup_perturbed(pred, sens)
-        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_pred, g2_pred = regroup_binary(pred, sens, 1)
+        g1_label, g2_label = regroup_binary(label_duped, sens, 1)
         g1_TPR, g2_TPR = get_TPR(g1_pred, g1_label, dim=1), get_TPR(g2_pred, g2_label, dim=1)
         TPR_loss = torch.abs(g1_TPR-g2_TPR)
         return TPR_loss
@@ -183,8 +184,8 @@ def loss_binary_perturbOptim(state_of_fairness, logit, label, sens_attr, p_coef=
         # dupe the label to have the same shape as x
         label_duped = label.repeat(x.shape[0], 1, 1)
         # regroup and compute TPR for both groups
-        g1_pred, g2_pred = regroup_perturbed(pred, sens)
-        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_pred, g2_pred = regroup_binary(pred, sens, 1)
+        g1_label, g2_label = regroup_binary(label_duped, sens, 1)
         g1_TNR, g2_TNR = get_TNR(g1_pred, g1_label, dim=1), get_TNR(g2_pred, g2_label, dim=1)
         TNR_loss = torch.abs(g1_TNR-g2_TNR)
         return TNR_loss
@@ -193,8 +194,8 @@ def loss_binary_perturbOptim(state_of_fairness, logit, label, sens_attr, p_coef=
         # dupe the label to have the same shape as x
         label_duped = label.repeat(x.shape[0], 1, 1)
         # regroup and compute TPR for both groups
-        g1_pred, g2_pred = regroup_perturbed(pred, sens)
-        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_pred, g2_pred = regroup_binary(pred, sens, 1)
+        g1_label, g2_label = regroup_binary(label_duped, sens, 1)
         g1_acc, g2_acc = get_acc(g1_pred, g1_label, dim=1), get_acc(g2_pred, g2_label, dim=1)
         acc_loss = torch.abs(g1_acc-g2_acc)
         return acc_loss
@@ -238,8 +239,8 @@ def loss_binary_perturbOptim_full(state_of_fairness, logit, label, sens_attr, p_
         # dupe the label to have the same shape as x
         label_duped = label.repeat(x.shape[0], 1, 1)
         # regroup and compute TPR for both groups
-        g1_pred, g2_pred = regroup_perturbed(pred, sens)
-        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_pred, g2_pred = regroup_binary(pred, sens, 1)
+        g1_label, g2_label = regroup_binary(label_duped, sens, 1)
         g1_TPR, g2_TPR = get_TPR(g1_pred, g1_label, dim=1), get_TPR(g2_pred, g2_label, dim=1)
         TPR_loss = torch.abs(g1_TPR-g2_TPR)
         return TPR_loss
@@ -248,8 +249,8 @@ def loss_binary_perturbOptim_full(state_of_fairness, logit, label, sens_attr, p_
         # dupe the label to have the same shape as x
         label_duped = label.repeat(x.shape[0], 1, 1)
         # regroup and compute TPR for both groups
-        g1_pred, g2_pred = regroup_perturbed(pred, sens)
-        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_pred, g2_pred = regroup_binary(pred, sens, 1)
+        g1_label, g2_label = regroup_binary(label_duped, sens, 1)
         g1_TNR, g2_TNR = get_TNR(g1_pred, g1_label, dim=1), get_TNR(g2_pred, g2_label, dim=1)
         TNR_loss = torch.abs(g1_TNR-g2_TNR)
         return TNR_loss
@@ -258,8 +259,8 @@ def loss_binary_perturbOptim_full(state_of_fairness, logit, label, sens_attr, p_
         # dupe the label to have the same shape as x
         label_duped = label.repeat(x.shape[0], 1, 1)
         # regroup and compute TPR for both groups
-        g1_pred, g2_pred = regroup_perturbed(pred, sens)
-        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_pred, g2_pred = regroup_binary(pred, sens, 1)
+        g1_label, g2_label = regroup_binary(label_duped, sens, 1)
         g1_acc, g2_acc = get_acc(g1_pred, g1_label, dim=1), get_acc(g2_pred, g2_label, dim=1)
         acc_loss = torch.abs(g1_acc-g2_acc)
         return acc_loss
@@ -269,8 +270,8 @@ def loss_binary_perturbOptim_full(state_of_fairness, logit, label, sens_attr, p_
         # dupe the label to have the same shape as x
         label_duped = label.repeat(x.shape[0], 1, 1)
         # regroup and compute TPR for both groups
-        g1_pred, g2_pred = regroup_perturbed(pred, sens)
-        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_pred, g2_pred = regroup_binary(pred, sens, 1)
+        g1_label, g2_label = regroup_binary(label_duped, sens, 1)
         g1_FNR, g2_FNR = get_FNR(g1_pred, g1_label, dim=1), get_FNR(g2_pred, g2_label, dim=1)
         return g1_FNR+g2_FNR
     def perturbed_rFPR(x, label=label, sens=sens_attr):
@@ -278,8 +279,8 @@ def loss_binary_perturbOptim_full(state_of_fairness, logit, label, sens_attr, p_
         # dupe the label to have the same shape as x
         label_duped = label.repeat(x.shape[0], 1, 1)
         # regroup and compute TPR for both groups
-        g1_pred, g2_pred = regroup_perturbed(pred, sens)
-        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_pred, g2_pred = regroup_binary(pred, sens, 1)
+        g1_label, g2_label = regroup_binary(label_duped, sens, 1)
         g1_FPR, g2_FPR = get_FPR(g1_pred, g1_label, dim=1), get_FPR(g2_pred, g2_label, dim=1)
         return g1_FPR+g2_FPR
     def perturbed_rgFNR(x, label=label, sens=sens_attr):
@@ -287,8 +288,8 @@ def loss_binary_perturbOptim_full(state_of_fairness, logit, label, sens_attr, p_
         # dupe the label to have the same shape as x
         label_duped = label.repeat(x.shape[0], 1, 1)
         # regroup and compute TPR for both groups
-        g1_pred, g2_pred = regroup_perturbed(pred, sens)
-        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_pred, g2_pred = regroup_binary(pred, sens, 1)
+        g1_label, g2_label = regroup_binary(label_duped, sens, 1)
         g1_FNR, g2_FNR = get_FNR(g1_pred, g1_label, dim=1), get_FNR(g2_pred, g2_label, dim=1)
         g1_TPR, g2_TPR = get_TPR(g1_pred, g1_label, dim=1), get_TPR(g2_pred, g2_label, dim=1)
         g1_FNR_mask, g2_FNR_mask = torch.where(g1_TPR < g2_TPR, 1, 0), torch.where(g2_TPR < g1_TPR, 1, 0)
@@ -298,8 +299,8 @@ def loss_binary_perturbOptim_full(state_of_fairness, logit, label, sens_attr, p_
         # dupe the label to have the same shape as x
         label_duped = label.repeat(x.shape[0], 1, 1)
         # regroup and compute TPR for both groups
-        g1_pred, g2_pred = regroup_perturbed(pred, sens)
-        g1_label, g2_label = regroup_perturbed(label_duped, sens)
+        g1_pred, g2_pred = regroup_binary(pred, sens, 1)
+        g1_label, g2_label = regroup_binary(label_duped, sens, 1)
         g1_FPR, g2_FPR = get_FPR(g1_pred, g1_label, dim=1), get_FPR(g2_pred, g2_label, dim=1)
         g1_TNR, g2_TNR = get_TNR(g1_pred, g1_label, dim=1), get_TNR(g2_pred, g2_label, dim=1)
         g1_FNR_mask, g2_FNR_mask = torch.where(g1_TNR < g2_TNR, 1, 0), torch.where(g2_TNR < g1_TNR, 1, 0)

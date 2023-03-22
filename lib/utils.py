@@ -5,7 +5,7 @@ import random
 
 import torch
 from torchvision import transforms
-from fairnessCategori import regroup_categori
+from .fairnessCategori import regroup_categori
 
 imagenet_mean = (0.485, 0.456, 0.406)
 imagenet_std  = (0.229, 0.224, 0.225)
@@ -51,7 +51,6 @@ def load_model(model, optimizer, scheduler, name, root_folder='/tmp2/aislab/maki
     scheduler.load_state_dict(ckpt['scheduler_state_dict'])
     torch.set_rng_state(ckpt['rng_state'])
     torch.cuda.set_rng_state(ckpt['cuda_rng_state'])
-    return model, optimizer, scheduler
 
 def save_stats(nparray, name, root_folder='/tmp2/aislab/makila/model_stats'):
     """Save the numpy array"""

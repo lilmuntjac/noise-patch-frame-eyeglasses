@@ -34,13 +34,13 @@ def filter_logit_categori(logit, batch_dim=0, model_name=None):
     else:
         assert False, f'unsupported model name, only "UTKFace" and "FairFace" are allowed.'
 
-def to_CEloss(race_logit, gender_logit, age_logit, label):
+def to_CEloss(race_logit, gender_logit, age_logit, label, reduction='mean'):
     """
     Get the cross entropy loss of race, gender, and age
     """
-    loss_CE_race = F.cross_entropy(race_logit, label[:,0])
-    loss_CE_gender = F.cross_entropy(gender_logit, label[:,1])
-    loss_CE_age = F.cross_entropy(age_logit, label[:,2])
+    loss_CE_race = F.cross_entropy(race_logit, label[:,0], reduction=reduction)
+    loss_CE_gender = F.cross_entropy(gender_logit, label[:,1], reduction=reduction)
+    loss_CE_age = F.cross_entropy(age_logit, label[:,2], reduction=reduction)
     return loss_CE_race, loss_CE_gender, loss_CE_age
 
 def to_prediction_categori(race_logit, gender_logit, age_logit, batch_dim=0):
@@ -59,6 +59,7 @@ def regroup_categori(tensor, label, sens_type, batch_dim=0):
     """
     Regroup losses, logit, prediction, or label into 2 groups by sensitive attribute
     """
+
     if batch_dim == 0:
         if sens_type == "race":
             # white and non-white
@@ -164,7 +165,7 @@ def loss_categori_CEmasking(logit, label, sens_type, attr_type, model_name=None)
     """
     race_logit, gender_logit, age_logit = filter_logit_categori(logit, batch_dim=0, model_name=model_name)
     pred = to_prediction_categori(race_logit, gender_logit, age_logit, batch_dim=0)
-    loss_CE_race, loss_CE_gender, loss_CE_age = to_CEloss(race_logit, gender_logit, age_logit, label)
+    loss_CE_race, loss_CE_gender, loss_CE_age = to_CEloss(race_logit, gender_logit, age_logit, label, reduction='none')
     # regroup the data by the sensitive attribute type
     group_1_pred, gropu_2_pred = regroup_categori(pred, label, sens_type, batch_dim=0)
     group_1_label, gropu_2_label = regroup_categori(label, label, sens_type, batch_dim=0)
