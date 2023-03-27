@@ -36,7 +36,7 @@ def main(args):
             noise_overlay = NoiseOverlay()
         case "patch" | "frame" | "eyeglasses":
             adv_component = torch.full((1, 3, 224, 224), 0.5).to(device)
-            heuristic_masking = HeuristicMasking(args.adv_type)
+            heuristic_masking = HeuristicMasking(args.adv_type, thickness=args.frame_thickness)
         case _:
             assert False, f'the adversarial type {args.adv_type} not supported'
     if args.resume:
@@ -72,7 +72,9 @@ def main(args):
                 case "frame":
                     adv_image, label = heuristic_masking.apply(data, label, adv_component)
                 case "eyeglasses":
-                    pass
+                    data, label, landmark = heuristic_masking.get_landmark(data, label)
+                    heuristic_masking.set_eyeglasses_transform(landmark)
+                    adv_image, label = heuristic_masking.apply(data, label, adv_component)
                 case _:
                     assert False, f'the adversarial type {args.adv_type} not supported'
             adv_image = normalize(adv_image)
@@ -123,7 +125,9 @@ def main(args):
                     case "frame":
                         adv_image, label = heuristic_masking.apply(data, label, adv_component)
                     case "eyeglasses":
-                        pass
+                        data, label, landmark = heuristic_masking.get_landmark(data, label)
+                        heuristic_masking.set_eyeglasses_transform(landmark)
+                        adv_image, label = heuristic_masking.apply(data, label, adv_component)
                     case _:
                         assert False, f'the adversarial type {args.adv_type} not supported'
                 adv_image = normalize(adv_image)
@@ -249,10 +253,9 @@ def get_args():
     parser.add_argument("--patch-val-ratio2img", default=[0.07, 0.07], type=float, nargs='+', help="patch ratio to image durning validation")
     parser.add_argument("--patch-avoid", default=None, type=float, help="distance from center of image to avoid covering")
     # frame only
-    #
+    parser.add_argument("--frame-thickness", default=0.25, type=float, help="the thickness of the frame")
     # eyeglasses only
-    #
-
+    # transform method ?
     # fairness parameter
     parser.add_argument("--sens-type", default="race", type=str, help="sensitive attribute to divide the dataset into 2 group")
     parser.add_argument("--attr-type", default="all", type=str, help="attribute that fairness is evaluated on")
