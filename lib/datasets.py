@@ -22,7 +22,7 @@ class CelebA:
 
     def __post_init__(self):
         train_transform = transforms.Compose([
-            transforms.RandAugment(),
+            transforms.TrivialAugmentWide(),
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
             # To make clipping on adverserial element intuitively, 
@@ -111,7 +111,7 @@ class UTKFace:
     def __post_init__(self):
         train_transform: transforms.transforms.Compose = \
             transforms.Compose([
-                transforms.RandAugment(),
+                transforms.TrivialAugmentWide(),
                 transforms.Resize((224, 224)),
                 transforms.ToTensor(),
                 # To make clipping on adverserial element intuitively
@@ -192,7 +192,7 @@ class FairFace:
     def __post_init__(self):
         train_transform: transforms.transforms.Compose = \
             transforms.Compose([
-                transforms.RandAugment(),
+                transforms.TrivialAugmentWide(),
                 transforms.Resize((224, 224)),
                 transforms.ToTensor(),
                 # To make clipping on adverserial element intuitively
