@@ -23,11 +23,10 @@ def main(args):
     val_dataloader = celeba.val_dataloader
     # model, optimizer, and scheduler
     model = CelebAModel(weights=None).to(device)
-    optimizer = torch.optim.RMSprop(
-        model.parameters(), lr=args.lr, alpha=0.9, eps=0.0316, 
-        weight_decay=1e-5, momentum=0.9,
+    optimizer = torch.optim.Adam(
+        model.parameters(), lr=args.lr, weight_decay=1e-5
     )
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.921)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
     model_ckpt_path = Path(args.model_ckpt_root)/args.model_name
     model_stat_path = Path(args.model_stat_root)/args.model_name
     if args.resume:
@@ -133,10 +132,10 @@ def get_args():
     parser.add_argument("--seed", default=32138, type=int, help="seed for the adversarial instance training process")
     parser.add_argument("-b", "--batch-size", default=128, type=int, help="batch size for model inputs")
     parser.add_argument("--epochs", default=125, type=int, help="number of epochs to run")
-    parser.add_argument("--lr", default=1e-4, type=float, help="step size for model training")
+    parser.add_argument("--lr", default=1e-1, type=float, help="step size for model training")
     # For model trained
-    parser.add_argument("--model-ckpt-root", default='/tmp2/aislab/makila/model_checkpoint', type=str, help='root path for model checkpoint')
-    parser.add_argument("--model-stat-root", default='/tmp2/aislab/makila/model_stats', type=str, help='root path for model statistic')
+    parser.add_argument("--model-ckpt-root", default='/tmp2/npfe/model_checkpoint', type=str, help='root path for model checkpoint')
+    parser.add_argument("--model-stat-root", default='/tmp2/npfe/model_stats', type=str, help='root path for model statistic')
     parser.add_argument("--model-name", default='default_model', type=str, help='name for this model trained')
     parser.add_argument("--resume", default="", help="name of a checkpoint, without .pth")
     parser.add_argument("--start-epoch", default=0, type=int, help="start epoch, it won't do any check with the weight loaded")
