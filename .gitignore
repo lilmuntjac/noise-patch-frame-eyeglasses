@@ -1,7 +1,9 @@
 __pycache__/
 eval/
+eval_resnet50/
 toyexp/
 oldscript/
 dlib_models/
 imgs/
 *.sh
+.vscode
