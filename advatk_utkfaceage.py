@@ -228,14 +228,14 @@ def get_args():
     import argparse
     parser = argparse.ArgumentParser(description="Adversarial component training")
     # For base model loaded
-    parser.add_argument("--model-ckpt-root", default='/tmp2/aislab/makila/model_checkpoint', type=str, help='root path for model checkpoint')
-    parser.add_argument("--model-stat-root", default='/tmp2/aislab/makila/model_stats', type=str, help='root path for model statistic')
+    parser.add_argument("--model-ckpt-root", default='/tmp2/npfe/model_checkpoint', type=str, help='root path for model checkpoint')
+    parser.add_argument("--model-stat-root", default='/tmp2/npfe/model_stats', type=str, help='root path for model statistic')
     parser.add_argument("--model-name", default='default_model', type=str, help='name for this model trained')
     parser.add_argument("--model-ckpt-name", default='default_model', type=str, help='name for the model checkpoint, without .pth')
     
     # For adversarial element (share by all type)
-    parser.add_argument("--advatk-ckpt-root", default='/tmp2/aislab/makila/advatk', type=str, help='root path for adversarial atttack statistic')
-    parser.add_argument("--advatk-stat-root", default='/tmp2/aislab/makila/advatk_stats', type=str, help='root path for adversarial attack itself')
+    parser.add_argument("--advatk-ckpt-root", default='/tmp2/npfe/advatk', type=str, help='root path for adversarial atttack statistic')
+    parser.add_argument("--advatk-stat-root", default='/tmp2/npfe/advatk_stats', type=str, help='root path for adversarial attack itself')
     parser.add_argument("--advatk-name", default='default_advatk', type=str, help='name for the advatk trained')
     parser.add_argument("--resume", default="", help="name of a adversarial element, without .npy")
     parser.add_argument("--start-epoch", default=0, type=int, help="start epoch, it won't do any check on the element loaded")
