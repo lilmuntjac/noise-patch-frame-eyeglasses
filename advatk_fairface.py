@@ -134,7 +134,7 @@ def main(args):
                 stat = calc_grouppq(pred, label, args.sens_type)
                 stat = stat[np.newaxis, :]
                 val_stat = val_stat+stat if len(val_stat) else stat
-                return val_stat # in shape (1, attribute+1, 4), the extra attribute is 'all'    
+            return val_stat # in shape (1, attribute+1, 4), the extra attribute is 'all'    
     # summarize the status in validation set for some adjustment
     def get_stats_per_epoch(stat):
         # Input: statistics for a single epochs, shape (1, attributes, 4)
