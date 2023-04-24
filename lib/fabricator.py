@@ -146,6 +146,8 @@ class HeuristicMasking:
         new_coord = list()
         for point in point_list:
             x, y = int(point[0]), int(point[1])
+            # landmark forced to be within the image
+            x, y = max(0, min(x, 223)), max(0, min(y, 223))
             new_x, new_y = self.coord_ref[x], self.coord_ref[y]
             new_coord.append([new_x, new_y])
         return new_coord
