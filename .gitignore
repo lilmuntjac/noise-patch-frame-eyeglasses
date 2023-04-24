@@ -4,6 +4,7 @@ eval_resnet50/
 toyexp/
 oldscript/
 dlib_models/
+exp/
 imgs/
 *.sh
 .vscode
