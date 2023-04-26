@@ -219,7 +219,7 @@ def loss_categori_perturbOptim(logit, label, sens_type, attr_type, coef, model_n
         label_duped = label.repeat(x.shape[0], 1, 1)
         group_1_pred, gropu_2_pred = regroup_categori(pred, label, sens_type, batch_dim=1)
         group_1_label, gropu_2_label = regroup_categori(label_duped, label, sens_type, batch_dim=1)
-        group_1_total, group_2_total = group_1_label.shape[0], gropu_2_label.shape[0]
+        group_1_total, group_2_total = group_1_label.shape[1], gropu_2_label.shape[1] # duped label is in shape (P, n, 3)
         # compute fairness
         if attr_type == "all":
             group_1_correct = torch.sum(torch.all(torch.eq(group_1_pred, group_1_label), dim=2), dim=1)
@@ -259,7 +259,7 @@ def loss_categori_perturbOptim_full(logit, label, sens_type, attr_type, coef, mo
         label_duped = label.repeat(x.shape[0], 1, 1)
         group_1_pred, gropu_2_pred = regroup_categori(pred, label, sens_type, batch_dim=1)
         group_1_label, gropu_2_label = regroup_categori(label_duped, label, sens_type, batch_dim=1)
-        group_1_total, group_2_total = group_1_label.shape[0], gropu_2_label.shape[0]
+        group_1_total, group_2_total = group_1_label.shape[1], gropu_2_label.shape[1]
         # compute fairness
         if attr_type == "all":
             group_1_correct = torch.sum(torch.all(torch.eq(group_1_pred, group_1_label), dim=2), dim=1)
@@ -284,7 +284,7 @@ def loss_categori_perturbOptim_full(logit, label, sens_type, attr_type, coef, mo
         label_duped = label.repeat(x.shape[0], 1, 1)
         group_1_pred, gropu_2_pred = regroup_categori(pred, label, sens_type, batch_dim=1)
         group_1_label, gropu_2_label = regroup_categori(label_duped, label, sens_type, batch_dim=1)
-        group_1_total, group_2_total = group_1_label.shape[0], gropu_2_label.shape[0]
+        group_1_total, group_2_total = group_1_label.shape[1], gropu_2_label.shape[1]
         #
         if attr_type == "all":
             group_1_correct = torch.sum(torch.all(torch.eq(group_1_pred, group_1_label), dim=2), dim=1)
