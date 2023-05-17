@@ -106,7 +106,7 @@ def loss_binary_direct(state_of_fairness, logit, label, sens_attr, p_coef=0, n_c
     positive_BCE, negative_BCE = loss_BCE*(label), loss_BCE*(torch.sub(1, label))
     # get and regroup the predictions
     # pred = torch.where(logit> 0.5, 1, 0) # gradient can't pass through this function
-    pred = 1./(1+torch.exp(-1e5*logit))
+    pred = 1./(1+torch.exp(-1e4*logit-0.5))
     g1_pred, g2_pred = regroup_binary(pred, sens_attr, 0)
     g1_label, g2_label = regroup_binary(label, sens_attr, 0)
     if state_of_fairness == 'equality of opportunity':

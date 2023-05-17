@@ -4,6 +4,30 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from .perturbations import *
+import random
+
+def filter_label_categori(label, model_name=None):
+    """
+    Convert raw label of UTKFace and FairFace into race, gender, and age in 1-hot encoding
+    Input:
+        label: raw label from UTKFace or FairFace model
+        model_name: name of the model, only "UTKFace" and "FairFace" are allowed
+    Output:
+        3 tensor of race_label, gender_label, and age_label, they are not in the same shape
+    """
+    # UTKFace
+    if model_name == "UTKFace":
+        race_label = F.one_hot(label[:,0], num_classes=5)
+        gender_label = F.one_hot(label[:,1], num_classes=2)
+        age_label = F.one_hot(label[:,2], num_classes=9)
+    # FairFace
+    elif model_name == "FairFace":
+        race_label =  F.one_hot(label[:,0], num_classes=7)
+        gender_label = F.one_hot(label[:,1], num_classes=2)
+        age_label = F.one_hot(label[:,2], num_classes=9)
+    else: 
+        assert False, f'unsupported model name, only "UTKFace" and "FairFace" are allowed.'
+    return race_label, gender_label, age_label
 
 def filter_logit_categori(logit, batch_dim=0, model_name=None):
     """
@@ -54,6 +78,19 @@ def to_prediction_categori(race_logit, gender_logit, age_logit, batch_dim=0):
     _, age_pred = torch.max(age_logit, dim=batch_dim+1)
     pred = torch.stack((race_pred, gender_pred, age_pred), dim=batch_dim+1)
     return pred
+
+def to_softprediction_categori(race_logit, gender_logit, age_logit, batch_dim=0):
+    """
+    Convert race_logit, gender_logit, and age_logit into soft prediction
+    """
+    # softmax then thresholding
+    race_softmax = F.softmax(race_logit, dim=batch_dim+1)
+    race_pred = 1./(1+torch.exp(-1e2*(race_softmax-0.5)))
+    gender_softmax = F.softmax(gender_logit, dim=batch_dim+1)
+    gender_pred = 1./(1+torch.exp(-1e2*(gender_softmax-0.5)))
+    age_softmax = F.softmax(age_logit, dim=batch_dim+1)
+    age_pred = 1./(1+torch.exp(-1e2*(age_softmax-0.5)))
+    return race_pred, gender_pred, age_pred
 
 def regroup_categori(tensor, label, sens_type, batch_dim=0):
     """
@@ -118,32 +155,36 @@ def loss_categori_direct(logit, label, sens_type, attr_type, coef, model_name=No
     # cross entropy loss
     race_logit, gender_logit, age_logit = filter_logit_categori(logit, batch_dim=0, model_name=model_name)
     loss_CE_race, loss_CE_gender, loss_CE_age = to_CEloss(race_logit, gender_logit, age_logit, label)
-    # prediction 
-    pred = to_prediction_categori(race_logit, gender_logit, age_logit, batch_dim=0)
-    # regroup logit and label by sensitive attribute type & compute accuracy
-    group_1_pred, gropu_2_pred = regroup_categori(pred, label, sens_type, batch_dim=0)
-    group_1_label, gropu_2_label = regroup_categori(label, label, sens_type, batch_dim=0)
-    group_1_total, group_2_total = group_1_label.shape[0], gropu_2_label.shape[0]
+    # prediction x label (soft result)
+    race_pred, gender_pred, age_pred = to_softprediction_categori(race_logit, gender_logit, age_logit, batch_dim=0)
+    race_label, gender_label, age_label = filter_label_categori(label, model_name=model_name)
+    race_result = torch.sum(race_pred*race_label, dim=1)
+    gender_result = torch.sum(gender_pred*gender_label, dim=1)
+    age_result = torch.sum(age_pred*age_label, dim=1)
+    result = torch.stack((race_result, gender_result, age_result), dim=1)
+    # regroup & compute the loss
+    group_1_result, group_2_result = regroup_categori(result, label, sens_type, batch_dim=0)
+    group_1_total, group_2_total = group_1_result.shape[0], group_2_result.shape[0]
     if attr_type == "all":
-        group_1_correct = torch.all(torch.eq(group_1_pred, group_1_label), dim=1).sum()
-        group_2_correct = torch.all(torch.eq(gropu_2_pred, gropu_2_label), dim=1).sum()
+        group_1_correct = (torch.sum(group_1_result, dim=1) == 3.).sum()
+        group_2_correct = (torch.sum(group_2_result, dim=1) == 3.).sum()
         loss_CE = loss_CE_race+loss_CE_gender+loss_CE_age
     elif attr_type == "race":
-        group_1_correct = torch.eq(group_1_pred, group_1_label)[:,0].sum()
-        group_2_correct = torch.eq(gropu_2_pred, gropu_2_label)[:,0].sum()
+        group_1_correct = group_1_result[:,0].sum()
+        group_2_correct = group_2_result[:,0].sum()
         loss_CE = loss_CE_race
     elif attr_type == "gender":
-        group_1_correct = torch.eq(group_1_pred, group_1_label)[:,1].sum()
-        group_2_correct = torch.eq(gropu_2_pred, gropu_2_label)[:,1].sum()
+        group_1_correct = group_1_result[:,1].sum()
+        group_2_correct = group_2_result[:,1].sum()
         loss_CE = loss_CE_gender
     elif attr_type == "age":
-        group_1_correct = torch.eq(group_1_pred, group_1_label)[:,2].sum()
-        group_2_correct = torch.eq(gropu_2_pred, gropu_2_label)[:,2].sum()
+        group_1_correct = group_1_result[:,2].sum()
+        group_2_correct = group_2_result[:,2].sum()
         loss_CE = loss_CE_age
     else:
         assert False, f'no such attribute'
     group_1_acc, group_2_acc = group_1_correct/(group_1_total+1e-9), group_2_correct/(group_2_total+1e-9)
-    direct_loss = torch.abs(group_1_acc-group_2_acc)
+    direct_loss = torch.abs(group_1_acc-group_2_acc) 
     loss = direct_loss+coef*loss_CE
     return loss
 

@@ -172,6 +172,7 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         print(f'Epoch: {epoch:02d}')
         train_stat_per_epoch = train()
+        print(adv_component[0,0,:,:]) 
         # adversary_scheduler.step()
         val_stat_per_epoch = val()
         train_stat = np.concatenate((train_stat, train_stat_per_epoch), axis=0) if len(train_stat) else train_stat_per_epoch
