@@ -87,6 +87,32 @@ def get_acc(pred, label, dim=0):
     acc = numerator/denominator
     return acc
 
+def get_attr_weight(state_of_fairness, logit, label, sens_attr):
+    """
+    Compute the weight for each attribute
+    """
+    # get the predicton and regroup by sensitive attribute
+    pred = torch.where(logit> 0.5, 1, 0)
+    g1_pred, g2_pred = regroup_binary(pred, sens_attr, 0)
+    g1_label, g2_label = regroup_binary(label, sens_attr, 0)
+    # get the current fairness status
+    if state_of_fairness == 'equality of opportunity':
+        g1_TPR, g2_TPR = get_TPR(g1_pred, g1_label, dim=0), get_TPR(g2_pred, g2_label, dim=0)
+        eqopp = torch.abs(g1_TPR-g2_TPR)
+        attr_weight = eqopp/torch.sum(eqopp)
+    elif state_of_fairness == 'equalized odds':
+        g1_TPR, g2_TPR = get_TPR(g1_pred, g1_label, dim=0), get_TPR(g2_pred, g2_label, dim=0)
+        g1_TNR, g2_TNR = get_TNR(g1_pred, g1_label, dim=0), get_TNR(g2_pred, g2_label, dim=0)
+        eqodd = torch.abs(g1_TPR-g2_TPR)+torch.abs(g1_TNR-g2_TNR)
+        attr_weight = eqodd/torch.sum(eqodd)
+    elif state_of_fairness == 'prediction quality':
+        g1_acc, g2_acc = get_acc(g1_pred, g1_label, dim=0), get_acc(g2_pred, g2_label, dim=0)
+        accdiff = torch.abs(g1_acc-g2_acc)
+        attr_weight = accdiff/torch.sum(accdiff)
+    else:
+        assert False, f'Unsupport state of fairness'
+    return attr_weight # in shape [A]
+
 """
 Fairness loss function (binary attributes)
 """
@@ -103,7 +129,7 @@ def loss_binary_direct(state_of_fairness, logit, label, sens_attr, p_coef=0, n_c
         fairness loss in shape []
     """
     loss_BCE = F.binary_cross_entropy(logit, label, reduction='none')
-    positive_BCE, negative_BCE = loss_BCE*(label), loss_BCE*(torch.sub(1, label))
+    positive_BCE, negative_BCE = torch.mean(loss_BCE*(label), dim=0), torch.mean(loss_BCE*(torch.sub(1, label)), dim=0)
     # get and regroup the predictions
     # pred = torch.where(logit> 0.5, 1, 0) # gradient can't pass through this function
     pred = 1./(1+torch.exp(-1e4*logit-0.5))
@@ -112,20 +138,20 @@ def loss_binary_direct(state_of_fairness, logit, label, sens_attr, p_coef=0, n_c
     if state_of_fairness == 'equality of opportunity':
         g1_TPR, g2_TPR = get_TPR(g1_pred, g1_label, dim=0), get_TPR(g2_pred, g2_label, dim=0)
         TPR_loss = torch.abs(g1_TPR-g2_TPR)
-        loss = TPR_loss+p_coef*positive_BCE
-        return torch.mean(loss)
+        loss_per_attr = TPR_loss+p_coef*positive_BCE
     elif state_of_fairness == 'equalized odds':
         g1_TPR, g2_TPR = get_TPR(g1_pred, g1_label, dim=0), get_TPR(g2_pred, g2_label, dim=0)
         g1_TNR, g2_TNR = get_TNR(g1_pred, g1_label, dim=0), get_TNR(g2_pred, g2_label, dim=0)
         TPR_loss, TNR_loss = torch.abs(g1_TPR-g2_TPR),  torch.abs(g1_TNR-g2_TNR)
-        loss = TPR_loss+p_coef*positive_BCE + TNR_loss+n_coef*negative_BCE
-        return torch.mean(loss)
+        loss_per_attr = TPR_loss+p_coef*positive_BCE + TNR_loss+n_coef*negative_BCE
     elif state_of_fairness == 'prediction quality':
         g1_acc, g2_acc = get_acc(g1_pred, g1_label, dim=0), get_acc(g2_pred, g2_label, dim=0)
-        acc_loss = torch.abs(g1_acc-g2_acc)
-        return torch.mean(acc_loss)
+        loss_per_attr = torch.abs(g1_acc-g2_acc)
     else:
         assert False, f'Unsupport state of fairness'
+    attr_weight = get_attr_weight(state_of_fairness, logit, label, sens_attr)
+    loss_per_attr *= attr_weight
+    return torch.mean(loss_per_attr)
 
 def loss_binary_BCEmasking(state_of_fairness, logit, label, sens_attr):
     """
@@ -142,7 +168,7 @@ def loss_binary_BCEmasking(state_of_fairness, logit, label, sens_attr):
         g1_TPR, g2_TPR = get_TPR(g1_pred, g1_label, dim=0), get_TPR(g2_pred, g2_label, dim=0)
         g1_p_coef, g2_p_coef= torch.where(g1_TPR > g2_TPR, -1, 0), torch.where(g2_TPR > g1_TPR, -1, 0)
         g1_p_loss, g2_p_loss = g1_BCE*(g1_label*g1_p_coef), g2_BCE*(g2_label*g2_p_coef)
-        loss = torch.cat((g1_p_loss, g2_p_loss), 0)
+        loss_per_cell = torch.cat((g1_p_loss, g2_p_loss), 0)
     elif state_of_fairness == 'equalized odds':
         g1_TPR, g2_TPR = get_TPR(g1_pred, g1_label, dim=0), get_TPR(g2_pred, g2_label, dim=0)
         g1_TNR, g2_TNR = get_TNR(g1_pred, g1_label, dim=0), get_TNR(g2_pred, g2_label, dim=0)
@@ -150,15 +176,18 @@ def loss_binary_BCEmasking(state_of_fairness, logit, label, sens_attr):
         g1_n_coef, g2_n_coef= torch.where(g1_TNR > g2_TNR, -1, 0), torch.where(g2_TNR > g1_TNR, -1, 0)
         g1_p_loss, g2_p_loss = g1_BCE*(g1_label*g1_p_coef), g2_BCE*(g2_label*g2_p_coef)
         g1_n_loss, g2_n_loss = g1_BCE*(torch.sub(1, g1_label)*g1_n_coef), g2_BCE*(torch.sub(1, g2_label)*g2_n_coef)
-        loss = torch.cat((g1_p_loss+g1_n_loss, g2_p_loss+g2_n_loss), 0)
+        loss_per_cell = torch.cat((g1_p_loss+g1_n_loss, g2_p_loss+g2_n_loss), 0)
     elif state_of_fairness == 'prediction quality':
         g1_acc, g2_acc = get_acc(g1_pred, g1_label, dim=0), get_acc(g2_pred, g2_label, dim=0)
         g1_coef, g2_coef= torch.where(g1_acc > g2_acc, -1, 0), torch.where(g2_acc > g1_acc, -1, 0)
         g1_loss, g2_loss = g1_BCE*g1_coef, g2_BCE*g2_coef
-        loss = torch.cat((g1_loss, g2_loss), 0)
+        loss_per_cell = torch.cat((g1_loss, g2_loss), 0)
     else:
         assert False, f'Unsupport state of fairness'
-    return torch.mean(loss)
+    # 
+    attr_weight = get_attr_weight(state_of_fairness, logit, label, sens_attr)
+    loss_per_attr = torch.mean(loss_per_cell, dim=0) * attr_weight
+    return torch.mean(loss_per_attr)
 
 def loss_binary_perturbOptim(state_of_fairness, logit, label, sens_attr, p_coef=0, n_coef=0):
     """
@@ -217,17 +246,20 @@ def loss_binary_perturbOptim(state_of_fairness, logit, label, sens_attr, p_coef=
                          batched=False)
     if state_of_fairness ==  'equality of opportunity':
         TPR_loss = pret_tpr(logit) # in shape (A)
-        loss = TPR_loss+p_coef*FN_BCE
+        loss_per_attr = TPR_loss+p_coef*FN_BCE
     elif state_of_fairness == 'equalized odds':
         TPR_loss = pret_tpr(logit) # in shape (A)
         TNR_loss = pret_tnr(logit) # in shape (A)
-        loss = TPR_loss+p_coef*FN_BCE + TNR_loss+n_coef*FP_BCE
+        loss_per_attr = TPR_loss+p_coef*FN_BCE + TNR_loss+n_coef*FP_BCE
     elif state_of_fairness == 'prediction quality':
         acc_loss = pret_acc(logit)
-        loss = acc_loss
+        loss_per_attr = acc_loss
     else:
         assert False, f'Unsupport state of fairness'
-    return torch.mean(loss)
+    # 
+    attr_weight = get_attr_weight(state_of_fairness, logit, label, sens_attr)
+    loss_per_attr *= attr_weight
+    return torch.mean(loss_per_attr)
 
 def loss_binary_perturbOptim_full(state_of_fairness, logit, label, sens_attr, p_coef=0, n_coef=0):
     """
@@ -336,16 +368,18 @@ def loss_binary_perturbOptim_full(state_of_fairness, logit, label, sens_attr, p_
     if state_of_fairness ==  'equality of opportunity':
         TPR_loss = pret_tpr(logit) # in shape (A)
         rFNR_loss = pret_rfnr(logit)
-        loss = TPR_loss+p_coef*rFNR_loss
+        loss_per_attr = TPR_loss+p_coef*rFNR_loss
     elif state_of_fairness == 'equalized odds':
         TPR_loss = pret_tpr(logit) # in shape (A)
         TNR_loss = pret_tnr(logit) # in shape (A)
         rFNR_loss = pret_rfnr(logit)
         rFPR_loss = pret_rfpr(logit)
-        loss = TPR_loss+p_coef*rFNR_loss + TNR_loss+n_coef*rFPR_loss
+        loss_per_attr = TPR_loss+p_coef*rFNR_loss + TNR_loss+n_coef*rFPR_loss
     elif state_of_fairness == 'prediction quality':
         acc_loss = pret_acc(logit)
-        loss = acc_loss
+        loss_per_attr = acc_loss
     else:
         assert False, f'Unsupport state of fairness'
-    return torch.mean(loss)
+    attr_weight = get_attr_weight(state_of_fairness, logit, label, sens_attr)
+    loss_per_attr *= attr_weight
+    return torch.mean(loss_per_attr)
