@@ -4,7 +4,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from .perturbations import *
-import random
 
 def filter_label_categori(label, model_name=None):
     """
@@ -96,7 +95,6 @@ def regroup_categori(tensor, label, sens_type, batch_dim=0):
     """
     Regroup losses, logit, prediction, or label into 2 groups by sensitive attribute
     """
-
     if batch_dim == 0:
         if sens_type == "race":
             # white and non-white
@@ -190,7 +188,7 @@ def loss_categori_direct(logit, label, sens_type, attr_type, coef, model_name=No
 
 def loss_categori_CEmasking(logit, label, sens_type, attr_type, model_name=None):
     """
-    Write the fairness loss directly defined by the fairness matrix
+    Write the fairness loss using the masked training loss
     Input: 
         logit: model output from model that made categorical predictions
         label: training label from the dataset
@@ -238,7 +236,19 @@ def loss_categori_CEmasking(logit, label, sens_type, attr_type, model_name=None)
 
 def loss_categori_perturbOptim(logit, label, sens_type, attr_type, coef, model_name=None):
     """
-    
+    Write the fairness loss directly with the perturb optimizer, training loss as recovery loss
+    Input: 
+        logit: model output from model that made categorical predictions
+        label: training label from the dataset
+        sens_type: sensitive attribute from the dataset,
+            race: white or non-white 
+            gander: male or female
+            age: age <= 30 or age > 30
+        attr_type: attribute type that fairness (accuracy) is evaluated on,
+                   it could be "all", "race", "gender", or "age".
+        model_name: specify the model used. It could be "UTKFace" or "FairFace"
+    Output:
+        fairness loss in shape []
     """
     # cross entropy loss
     race_logit, gender_logit, age_logit = filter_logit_categori(logit, batch_dim=0, model_name=model_name)
@@ -291,7 +301,19 @@ def loss_categori_perturbOptim(logit, label, sens_type, attr_type, coef, model_n
 
 def loss_categori_perturbOptim_full(logit, label, sens_type, attr_type, coef, model_name=None):
     """
-    
+    Write the fairness loss directly with the perturb optimizer, perturb optimizer as recovery loss
+    Input: 
+        logit: model output from model that made categorical predictions
+        label: training label from the dataset
+        sens_type: sensitive attribute from the dataset,
+            race: white or non-white 
+            gander: male or female
+            age: age <= 30 or age > 30
+        attr_type: attribute type that fairness (accuracy) is evaluated on,
+                   it could be "all", "race", "gender", or "age".
+        model_name: specify the model used. It could be "UTKFace" or "FairFace"
+    Output:
+        fairness loss in shape []
     """
     # fairness function
     def perturbed_pq(x, label=label):
