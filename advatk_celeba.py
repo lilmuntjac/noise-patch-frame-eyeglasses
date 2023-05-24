@@ -186,7 +186,7 @@ def main(args):
             p_coef_list, n_coef_list = p_coef.clone().cpu().numpy().tolist(), n_coef.clone().cpu().numpy().tolist()
             p_coef_list, n_coef_list = [f'{f:.4f}' for f in p_coef_list], [f'{f:.4f}' for f in n_coef_list]
             print(f'    p-coef: {" ".join(p_coef_list)} -- n-coef: {" ".join(n_coef_list)}')
-            for a in range(1): # all attributes
+            for a in range(4): # all attributes
                 if curr_tacc[a] < init_tacc[a] - args.quality_target:
                     p_coef[a], n_coef[a] = min(p_coef[a]*1.05, 1e3), min(n_coef[a]*1.05, 1e3)
                 elif args.fairness_matrix == "equality of opportunity":
