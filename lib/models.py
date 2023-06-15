@@ -182,6 +182,30 @@ class FairFaceModel(torch.nn.Module):
         """
         z = self.model(x)
         return z
+    
+class MAADFaceHQModel(torch.nn.Module):
+    """
+    Entire MAADFaceHQ attribute predictions (without Male)
+    """
+
+    def __init__(self, out_feature=46, weights='ResNet50_Weights.DEFAULT'):
+        super(MAADFaceHQModel, self).__init__()
+        self.model = models.resnet50(weights=weights)
+        in_feature = self.model.fc.in_features
+        self.model.fc = nn.Sequential(OrderedDict([
+            ('fc', nn.Linear(in_feature, out_feature)),
+            ('sigm', nn.Sigmoid()),
+        ]))
+
+    def forward(self, x):
+        """
+        Input:
+            x: Image of faces        (N, C, H, W)
+        Output:
+            z: attribute predictions (N, 47)
+        """
+        z = self.model(x)
+        return z
 
 class AgeModel(torch.nn.Module):
     """

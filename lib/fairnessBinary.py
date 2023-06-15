@@ -383,3 +383,30 @@ def loss_binary_perturbOptim_full(state_of_fairness, logit, label, sens_attr, p_
     attr_weight = get_attr_weight(state_of_fairness, logit, label, sens_attr)
     loss_per_attr *= attr_weight
     return torch.mean(loss_per_attr)
+
+def loss_binary_perturbOptim_test(state_of_fairness, logit, label, sens_attr, p_coef=0, n_coef=0):
+    """
+    Epoch based, Write the fairness loss directly and warp it with perturbMAP
+    """ 
+    # perturbed_eqodd
+    def perturbed_eqodd(x, label=label, sens=sens_attr):
+        pred = torch.where(x> 0.5, 1, 0)
+        # dupe the label to have the same shape as x
+        label_duped = label.repeat(x.shape[0], 1, 1)
+        # regroup and compute TPR for both groups
+        g1_pred, g2_pred = regroup_binary(pred, sens, 1)
+        g1_label, g2_label = regroup_binary(label_duped, sens, 1)
+        g1_TPR, g2_TPR = get_TPR(g1_pred, g1_label, dim=1), get_TPR(g2_pred, g2_label, dim=1)
+        g1_TNR, g2_TNR = get_TNR(g1_pred, g1_label, dim=1), get_TNR(g2_pred, g2_label, dim=1)
+        eqopp_loss = torch.abs(g1_TPR-g2_TPR) + torch.abs(g1_TNR-g2_TNR)
+        return eqopp_loss
+    # Turns a function into a differentiable one via perturbations
+    pret_eqodd = perturbed(perturbed_eqodd, 
+                         num_samples=10000,
+                         sigma=0.5,
+                         noise='gumbel',
+                         batched=False)
+    loss_per_attr = pret_eqodd(logit)
+    attr_weight = get_attr_weight(state_of_fairness, logit, label, sens_attr)
+    loss_per_attr = loss_per_attr*attr_weight
+    return torch.mean(loss_per_attr)

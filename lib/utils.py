@@ -4,6 +4,7 @@ import pandas as pd
 import random
 
 import torch
+import torch.nn.functional as F
 from torchvision import transforms
 from .fairnessCategori import regroup_categori
 
@@ -138,6 +139,31 @@ def calc_groupcm(pred, label, sens):
         fp = torch.mul(pred[:,idx], torch.sub(1, label[:,idx])).sum()
         fn = torch.mul(torch.sub(1, pred[:,idx]), label[:,idx]).sum()
         tn = torch.mul(torch.sub(1, pred[:,idx]), torch.sub(1, label[:,idx])).sum()
+        return tp, fp, fn, tn
+    m_pred, m_label = pred[sens[:,0]==1], label[sens[:,0]==1]
+    f_pred, f_label = pred[sens[:,0]==0], label[sens[:,0]==0]
+    stat = np.array([])
+    for idx in range(label.shape[-1]):
+        mtp, mfp, mfn, mtn = confusion_matrix(m_pred, m_label, idx)
+        ftp, ffp, ffn, ftn = confusion_matrix(f_pred, f_label, idx)
+        row = np.array([[mtp.item(), mfp.item(), mfn.item(), mtn.item(), ftp.item(), ffp.item(), ffn.item(), ftn.item()]])
+        stat =  np.concatenate((stat, row), axis=0) if len(stat) else row
+    return stat
+
+def calc_groupcm_soft(pred, label, sens):
+    """
+    Split the prediction and the corresponding label by its sensitive attribute,
+    then compute the confusion matrix for them.
+        Output:
+            Numpy array in shape (attributes, 8) male & female confusion matrix
+    """
+    def confusion_matrix(pred, label, idx):
+        label_strong = torch.where(label>0.4, 1, 0)
+        label_weak = torch.where(label<0.6, 0, 1)
+        tp = torch.mul(pred[:,idx], label_strong[:,idx]).sum()
+        fp = torch.mul(pred[:,idx], torch.sub(1, label_strong[:,idx])).sum()
+        fn = torch.mul(torch.sub(1, pred[:,idx]), label_weak[:,idx]).sum()
+        tn = torch.mul(torch.sub(1, pred[:,idx]), torch.sub(1, label_weak[:,idx])).sum()
         return tp, fp, fn, tn
     m_pred, m_label = pred[sens[:,0]==1], label[sens[:,0]==1]
     f_pred, f_label = pred[sens[:,0]==0], label[sens[:,0]==0]

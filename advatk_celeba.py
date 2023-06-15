@@ -89,6 +89,8 @@ def main(args):
                     loss = loss_binary_perturbOptim(args.fairness_matrix, logit, label, sens, p_coef, n_coef)
                 case "full perturbOptim":
                     loss = loss_binary_perturbOptim_full(args.fairness_matrix, logit, label, sens, p_coef, n_coef)
+                case "test perturbOptim":
+                    loss = loss_binary_perturbOptim_test(args.fairness_matrix, logit, label, sens, p_coef, n_coef)
                 case _:
                     assert False, f'unsupport loss type {args.loss_type}'
             loss.backward()
